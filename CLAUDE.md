@@ -11,11 +11,12 @@ autonomously.
 
 ## Commit discipline
 
-- **Each phase commits in two stages minimum: (1) failing acceptance tests,
-  (2) implementation turning them green. The red state must be a distinct
-  commit.** (Adopted 2026-07-14, effective Phase 3 onward.) Red and green
-  land in the same push/PR so "no merge on red" gates the head commit while
-  the red commit remains in history.
+- **Each phase lands in two commits minimum: (1) failing acceptance tests,
+  committed red; (2) implementation turning them green. The red state must
+  be a distinct, pushed commit so test-first is git-provable.** (Adopted
+  2026-07-14, effective Phase 3 onward.) Red and green go up in the same
+  push/PR so "no merge on red" gates the head commit while the red commit
+  remains in history.
 - Every commit carries the `Co-Authored-By` trailer identifying AI
   authorship. History is never rewritten to obscure it.
 
