@@ -7,8 +7,8 @@ Titlan is an end-to-end encrypted messenger: no phone numbers, no accounts,
 and a relay server that is architecturally incapable of reading content or
 logging identities. GrapheneOS first, standard Android second.
 
-Titlan is the first module of the Tezca platform and is published by Oculux
-Technologies LLC.
+Titlan is the first module of a broader security platform, published by
+Oculux Technologies LLC.
 
 **Status: Phase 2 — core protocol implemented.** Envelope, PQXDH sessions
 (libsignal), and encrypted storage are in place with full test coverage; the
