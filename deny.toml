@@ -59,6 +59,9 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Our own unpublished workspace crates are consumed by path (no version);
+# registry wildcards remain denied. Maintainer-approved 2026-07-14.
+allow-wildcard-paths = true
 
 # ---------------------------------------------------------------------------
 # INV-6 MECHANICAL ENFORCEMENT: cryptographic primitive crates may exist in
@@ -75,7 +78,13 @@ deny = [
     { name = "ctr", wrappers = ["aes-gcm-siv", "libsignal-protocol", "signal-crypto"] },
     { name = "cbc", wrappers = ["signal-crypto"] },
     { name = "chacha20poly1305", wrappers = [] },
-    { name = "sha1", wrappers = ["hkdf", "signal-crypto"] },
+    # sha1 for tungstenite/tokio-tungstenite: RFC 6455 REQUIRES SHA-1 for the
+    # WebSocket opening handshake (Sec-WebSocket-Accept). This is protocol
+    # framing mandated by the standard, not a cryptographic choice of ours —
+    # no confidentiality or integrity property of Titlan rests on it.
+    # Maintainer-approved 2026-07-14 for both the test client (tungstenite)
+    # and the relay's WS server side (tokio-tungstenite, via axum).
+    { name = "sha1", wrappers = ["hkdf", "signal-crypto", "tungstenite", "tokio-tungstenite"] },
     { name = "sha2", wrappers = ["curve25519-dalek", "hkdf", "hmac", "libsignal-core", "libsignal-protocol", "signal-crypto", "spqr"] },
     { name = "md-5", wrappers = ["hmac", "uuid"] },
     { name = "hmac", wrappers = ["hkdf", "libsignal-protocol", "signal-crypto", "spqr"] },

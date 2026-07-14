@@ -15,5 +15,14 @@ publish = false
 # INV-2 (blind relay) and INV-3 (no server-side persistence) constrain every
 # dependency and every logging statement added here.
 
+[dev-dependencies]
+# Acceptance tests drive a real relay child process end-to-end with real
+# tezca-core clients (work order §6 Phase 3 acceptance).
+tezca-core = { path = "../tezca-core" }
+tempfile = { workspace = true }
+# WebSocket test client. NOTE: tungstenite requires `sha1` (RFC 6455
+# handshake) — needs the maintainer-approved wrapper extension in deny.toml.
+tungstenite = "0.28"
+
 [lints]
 workspace = true
