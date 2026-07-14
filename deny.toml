@@ -65,8 +65,8 @@ wildcards = "deny"
 # the graph ONLY as direct dependencies of the wrapper crates listed with
 # them (libsignal's tree and RustCrypto-internal composition). Adding any of
 # these as a dependency of tezca-* code fails CI. Extending a wrappers list
-# or adding a new primitive requires explicit human approval (Danny) with an
-# approval note in the PR.
+# or adding a new primitive requires explicit approval by the maintainer,
+# with an approval note in the PR.
 # ---------------------------------------------------------------------------
 deny = [
     { name = "aes", wrappers = ["aes-gcm-siv", "cbc", "ctr", "libsignal-protocol", "signal-crypto"] },
