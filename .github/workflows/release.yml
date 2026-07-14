@@ -73,7 +73,7 @@ jobs:
             dist/tezca-relay
             dist/titlan-android-unsigned.apk
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: titlan-release-${{ github.ref_name }}
           path: dist/
