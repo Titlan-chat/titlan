@@ -12,11 +12,22 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-# Phase 2 (work order §6) adds: libsignal (official Rust crate — the ONLY
-# source of cryptographic primitives, per A2/INV-6), rusqlite+sqlcipher (A4),
-# and uniffi (A3). No crypto-adjacent dependency may be added outside that
-# list without explicit human approval (INV-6); deny.toml and cargo-deny in CI
-# gate the dependency tree.
+# INV-6: libsignal is the only crypto source; rusqlite/SQLCipher is locked by
+# A4; rand supplies the OS CSPRNG that libsignal's API contract requires the
+# caller to pass in. No other crypto-adjacent dependency without explicit
+# human approval — deny.toml bans primitive crates outside libsignal's tree.
+libsignal-protocol = { workspace = true }
+rusqlite = { workspace = true }
+rand = { workspace = true }
+zeroize = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }
 
 [lints]
 workspace = true

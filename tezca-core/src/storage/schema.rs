@@ -1,0 +1,98 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+
+//! Schema migrations. Each migration runs inside a transaction and is
+//! recorded in `schema_migrations` (§8: storage migration tests).
+
+use crate::{CoreError, Result};
+
+const V1_DDL: &str = "
+CREATE TABLE local_identity (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  address_name TEXT NOT NULL,
+  registration_id INTEGER NOT NULL,
+  identity_keypair BLOB NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE sessions (
+  address TEXT NOT NULL,
+  device_id INTEGER NOT NULL,
+  record BLOB NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (address, device_id)
+);
+CREATE TABLE identities (
+  address TEXT PRIMARY KEY,
+  identity_key BLOB NOT NULL,
+  trusted_at INTEGER NOT NULL
+);
+CREATE TABLE prekeys (
+  id INTEGER PRIMARY KEY,
+  record BLOB NOT NULL
+);
+CREATE TABLE signed_prekeys (
+  id INTEGER PRIMARY KEY,
+  record BLOB NOT NULL
+);
+CREATE TABLE kyber_prekeys (
+  id INTEGER PRIMARY KEY,
+  record BLOB NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE conversations (
+  id BLOB PRIMARY KEY,
+  peer_address TEXT NOT NULL,
+  relay_url TEXT NOT NULL,
+  mailbox_send BLOB,
+  mailbox_recv BLOB,
+  padding_profile TEXT NOT NULL DEFAULT 'default',
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE messages (
+  id BLOB PRIMARY KEY,
+  conversation_id BLOB NOT NULL REFERENCES conversations(id),
+  direction INTEGER NOT NULL,
+  payload_type INTEGER NOT NULL,
+  type_version INTEGER NOT NULL,
+  body BLOB NOT NULL,
+  sent_at INTEGER,
+  received_at INTEGER,
+  status INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_messages_conversation ON messages(conversation_id);
+";
+
+/// Applies all pending migrations to an open, keyed connection.
+pub(crate) fn migrate(conn: &rusqlite::Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (
+           version INTEGER PRIMARY KEY,
+           applied_at INTEGER NOT NULL
+         );",
+    )
+    .map_err(sql_err)?;
+
+    let current: u32 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_err)?;
+
+    if current < 1 {
+        let tx = conn.unchecked_transaction().map_err(sql_err)?;
+        tx.execute_batch(V1_DDL).map_err(sql_err)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (1, unixepoch())",
+            [],
+        )
+        .map_err(sql_err)?;
+        tx.commit().map_err(sql_err)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn sql_err(e: rusqlite::Error) -> CoreError {
+    CoreError::Storage(e.to_string())
+}

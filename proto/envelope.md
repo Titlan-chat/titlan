@@ -1,57 +1,145 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
 
-# Tezca Wire Envelope — Specification
+# Tezca Wire Envelope — Specification v1
 
-**Status: DRAFT SKELETON (Phase 1).** The normative encoding is implemented
-and finalized in Phase 2; Phase 5 completes this document to the point where
-a third party can implement a compatible client.
+**Status: NORMATIVE for envelope framing (Phase 2).** Session-setup payload
+semantics and relay transport are specified separately (`proto/pairing.md`,
+Phase 3 relay docs). All integers are big-endian.
 
 ## Design constraints (locked)
 
-- **Versioned and typed from day one** (A8, INV-4): every wire message carries
-  a protocol version and a payload type. Receivers reject unknown versions and
-  unknown payload types cleanly — never crash, never guess.
-- **Sealed sender** (A6): the relay learns recipient mailbox ID and timing
-  only. Sender identity travels inside the encrypted envelope.
-- **Padded ciphertext buckets** (A8): ciphertexts are padded to fixed-size
-  buckets for traffic-analysis resistance.
-- **Transport-agnostic**: the envelope is the unit deposited to and delivered
-  by any relay; relay addresses come from conversation/team configuration
-  (INV-5), never from the envelope or from constants outside the single
-  default-config value.
+- **Versioned and typed** (A8, INV-4): unknown versions and unknown payload
+  types are rejected cleanly — never a crash, never a guess.
+- **Sealed metadata** (A6): the relay sees mailbox ID, timing, and the outer
+  envelope only. Payload type and true length are inside the encryption.
+- **Padded buckets** (A8): inner plaintext is padded to fixed bucket sizes
+  BEFORE encryption, so padding is authenticated and observers see only
+  bucket-clustered ciphertext sizes.
+- **Transport-agnostic** (INV-5): relay addresses come from conversation
+  configuration; nothing in the envelope names a relay.
 
-## Envelope structure (shape, non-normative until Phase 2)
+## Layer 1 — outer envelope (visible to relay and wire)
 
-| Field | Description |
-|-------|-------------|
-| `version` | Protocol version. Unknown → reject cleanly (INV-4). |
-| `payload_type` | Typed enum, see registry below. Unknown → reject cleanly. |
-| `ciphertext` | Sealed-sender encrypted payload (libsignal), padded to a bucket size. |
+| offset | size | field | rule |
+|---|---|---|---|
+| 0 | 4 | magic | `54 5A 43 41` (`"TZCA"`); mismatch ⇒ reject (malformed) |
+| 4 | 1 | version | `0x01`; any other value ⇒ reject (unsupported version). v1 receivers accept exactly {1}. |
+| 5 | 1 | kind | `0x01` session-setup (libsignal `PreKeySignalMessage`), `0x02` ratchet (`SignalMessage`); other ⇒ reject |
+| 6 | 2 | reserved | `0x0000`; any other value ⇒ reject in v1 |
+| 8 | … | ciphertext | libsignal message bytes, to end of blob; MUST be ≥ 1 byte |
 
-## Payload type registry
+Minimum well-formed envelope: 9 bytes. There is deliberately **no cleartext
+length field and no cleartext payload-type field**.
 
-| Type | Status |
-|------|--------|
-| `chat/1` | Implemented in MVP (Phase 2) |
-| `posture/1` | Reserved — Tezca suite, not in MVP |
-| `policy/1` | Reserved — Tezca suite, not in MVP |
-| `alert/1` | Reserved — Tezca suite, not in MVP |
+## Layer 2 — inner frame (plaintext of the ratchet encryption)
 
-Reserved types exist so the envelope never needs a breaking change when the
-platform grows machine payloads. The MVP implements `chat/1` only and rejects
-everything else as unknown.
+| offset | size | field | rule |
+|---|---|---|---|
+| 0 | 1 | payload_type | registry below; unknown ⇒ reject (unknown type) |
+| 1 | 1 | type_version | version of that payload type; `chat/1` = (`0x01`, `0x01`) |
+| 2 | 4 | payload_len | u32; `6 + payload_len` MUST fit the frame |
+| 6 | N | payload | |
+| 6+N | P | padding | `0x00` bytes to exactly one configured bucket size |
 
-## Padding buckets
+Receiver rules (all violations are clean, typed rejections):
+1. Total decrypted frame length MUST equal exactly one configured bucket.
+2. `6 + payload_len` MUST be ≤ frame length.
+3. Every byte after the payload MUST be `0x00`.
 
-Proposed defaults: **512 B / 2 KiB / 8 KiB** (work order §6 Phase 2).
-Implemented as configuration; final values require human approval before
-release (work order §10.2) — do not treat the proposal as decided.
+Sender rule: if `payload_len > largest_bucket − 6`, fail BEFORE any
+cryptographic operation runs (`PayloadTooLarge`).
 
-## Open items (tracked for Phase 2)
+## Payload type registry (this document is the numbering authority)
 
-- Normative byte-level encoding of header and fields
-- Version negotiation / downgrade-rejection rules
-- Maximum envelope size and oversize handling
-- Test vectors (including malformed, wrong-version, unknown-type,
-  oversized, and replayed envelopes — work order §8 negative tests)
+| byte | name | status |
+|---|---|---|
+| `0x01` | `chat` | chat/1 implemented (MVP): payload is UTF-8 text |
+| `0x02` | `posture` | **first-class reserved** — Tezca suite |
+| `0x03` | `policy` | **first-class reserved** — Tezca suite |
+| `0x04` | `alert` | **first-class reserved** — Tezca suite |
+| `0x05–0x7F` | — | unassigned; allocation requires an entry here |
+| `0x80–0xFF` | — | private/experimental; never allocated by this registry |
+
+**First-class reserved** means: the frame encodes, decodes, and round-trips
+in every conforming implementation today. A client that recognizes a type but
+does not implement it responds at the application layer (ack-and-drop /
+"recognized but unsupported") — this is NOT a protocol error. Only bytes
+outside the registry are protocol errors. Each type versions independently:
+`posture/2` someday changes nothing about `chat/1`.
+
+## Padding buckets (work order §10.2 — RESOLVED 2026-07-14)
+
+- Default profile: **512 B / 2048 B / 8192 B**, applied to the inner frame.
+  Maximum payload under the default profile: **8186 bytes**.
+- Profiles are **per-conversation** configuration, like the relay address.
+- Observable leak with 3 buckets: ≈ log₂3 ≈ 1.6 bits of coarse length per
+  message. Conversations expected to carry mixed human+machine payload types
+  SHOULD use a **single-bucket profile** so bucket size cannot proxy for
+  payload type.
+
+## Test vectors (NORMATIVE)
+
+Conforming implementations MUST reproduce these byte-exact. The reference
+test suite is `tezca-core/tests/envelope_spec.rs`.
+
+### V1 — outer, ratchet kind
+
+Envelope: kind `0x02`, ciphertext = 16 × `0xAA`:
+
+```
+545a434101020000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+### V2 — outer, session-setup kind
+
+Envelope: kind `0x01`, ciphertext = `01 02 03`:
+
+```
+545a434101010000010203
+```
+
+### V3 — inner, chat/1 "hi titlan" (default profile)
+
+9-byte payload ⇒ 512-byte frame: the 15 bytes below, then 497 × `00`.
+
+```
+0101000000096869207469746c616e
+```
+
+### V4 — inner, posture/1 with empty payload (default profile)
+
+512-byte frame: the 6 bytes below, then 506 × `00`. (Demonstrates a reserved
+platform type framing byte-exactly today.)
+
+```
+020100000000
+```
+
+### V5 — inner, alert/1 payload `DE AD` (default profile)
+
+512-byte frame: the 8 bytes below, then 504 × `00`.
+
+```
+040100000002dead
+```
+
+### Negative vectors
+
+| input | required rejection |
+|---|---|
+| outer, version byte `0x02` | unsupported version |
+| outer, kind byte `0x03` | unknown kind |
+| outer, reserved `0x0001` | reserved-must-be-zero |
+| outer, 8 bytes (header only) | malformed (empty ciphertext) |
+| inner, 513-byte frame (default profile) | invalid bucket |
+| inner, `payload_len` = 507 in a 512-byte frame | malformed (length exceeds frame) |
+| inner, valid frame with one padding byte `0x01` | invalid padding |
+| inner, payload_type `0x4A` | unknown payload type |
+| inner, chat/1 payload 8187 bytes (sender side) | payload too large (max 8186) |
+
+## Open items (Phase 5 completes the spec)
+
+- Version negotiation posture for v2+ (v1 policy: accept exactly {1})
+- Relay-side maximum blob size (Phase 3, must admit an 8192-bucket frame
+  plus ratchet overhead)

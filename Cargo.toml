@@ -4,11 +4,40 @@
 [workspace]
 resolver = "3"
 members = ["tezca-core", "tezca-relay"]
+# The fuzz crate is its own workspace (cargo-fuzz convention, nightly-only).
+exclude = ["tezca-core/fuzz"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
+
+[workspace.dependencies]
+# A2/INV-6: the official libsignal Rust crate is the ONLY source of
+# cryptographic primitives. Git-only upstream (not on crates.io); pinned tag,
+# exact rev sealed in Cargo.lock. deny.toml enforces the primitive-crate ban
+# outside libsignal's dependency tree.
+libsignal-protocol = { version = "0.1.0", git = "https://github.com/signalapp/libsignal", tag = "v0.97.2" }
+# A4: SQLCipher at-rest encryption (locked decision; vendored OpenSSL for
+# self-contained Android cross-builds later).
+rusqlite = { version = "0.40.1", features = ["bundled-sqlcipher-vendored-openssl"] }
+# OS CSPRNG handle passed INTO libsignal APIs (their functions require a
+# caller-supplied Rng + CryptoRng). Version matched to libsignal's rand.
+rand = "0.9"
+zeroize = { version = "1", features = ["derive"] }
+thiserror = "2"
+hex = "0.4"
+async-trait = "0.1"
+# Executor shim: libsignal store traits have async signatures; our SQL impls
+# are synchronous underneath.
+futures = { version = "0.3", default-features = false, features = ["executor"] }
+tempfile = "3"
+proptest = "1"
+
+# Mirror of libsignal's own [patch.crates-io] (patches do not propagate from
+# dependencies): their audited curve25519-dalek fork. Same tag as v0.97.2.
+[patch.crates-io]
+curve25519-dalek = { git = "https://github.com/signalapp/curve25519-dalek", tag = "signal-curve25519-4.1.3" }
 
 # Phase 5 targets zero unsafe blocks in core (work order §6). Deny it now;
 # any future exception needs an explicit, justified `#[allow(unsafe_code)]`.
@@ -20,3 +49,15 @@ missing_docs = "warn"
 # Strip symbols: smaller artifacts and fewer host-path strings embedded in the
 # binary, which the reproducible-build pipeline (scripts/repro-build.sh) relies on.
 strip = "symbols"
+# Mirror libsignal's tested release configuration: overflow checks on, except
+# the three crates upstream exempts for performance.
+overflow-checks = true
+
+[profile.release.package.curve25519-dalek]
+overflow-checks = false
+
+[profile.release.package.sha2]
+overflow-checks = false
+
+[profile.release.package.hmac]
+overflow-checks = false

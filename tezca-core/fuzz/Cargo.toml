@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+
+[package]
+name = "tezca-core-fuzz"
+version = "0.0.0"
+description = "cargo-fuzz targets for the tezca envelope parsers (work order §6 Phase 2)"
+license = "Apache-2.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tezca-core = { path = ".." }
+
+# Standalone workspace: mirror the root [patch.crates-io] (patches do not
+# propagate), same tag as libsignal v0.97.2.
+[patch.crates-io]
+curve25519-dalek = { git = "https://github.com/signalapp/curve25519-dalek", tag = "signal-curve25519-4.1.3" }
+
+[[bin]]
+name = "envelope_parse"
+path = "fuzz_targets/envelope_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inner_parse"
+path = "fuzz_targets/inner_parse.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

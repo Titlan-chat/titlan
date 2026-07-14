@@ -3,18 +3,26 @@
 #
 # cargo-deny configuration — INV-7 (dependency hygiene) and INV-6 (no custom
 # crypto) enforcement point. CI fails on advisories, unknown sources, wildcard
-# versions, and licenses outside the allowlist below.
+# versions, licenses outside the allowlist, and — critically — any attempt to
+# depend on a cryptographic-primitive crate from outside libsignal's tree.
 
 [graph]
 all-features = true
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # proc-macro-error2 is unmaintained; reaches us transitively via libcrux's
+    # hax formal-verification macros inside libsignal's tree. Nothing to fix
+    # on our side; revisit on every libsignal bump.
+    { id = "RUSTSEC-2026-0173", reason = "transitive via libsignal → libcrux → hax-lib-macros; build-time proc-macro only" },
+]
 
 [licenses]
-# tezca-core is Apache-2.0 (A10): its dependency tree must stay permissive so
-# proprietary Tezca suite modules can reuse the core. AGPL is allowed ONLY for
-# our own crates via the exceptions list — never for third-party dependencies.
+# tezca-core is Apache-2.0 (A10): its dependency tree stays permissive except
+# for the explicitly scoped exceptions below. AGPL is allowed ONLY for our own
+# crates and the libsignal tree (A2 locked decision; combined-work implications
+# are flagged as work order §10.6 — pre-Tezca-suite decision item).
 allow = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -24,21 +32,70 @@ allow = [
     "ISC",
     "Zlib",
     "Unicode-3.0",
+    # OpenSSL license: openssl-src vendored by SQLCipher (locked A4).
+    "OpenSSL",
 ]
 exceptions = [
     { name = "tezca-relay", allow = ["AGPL-3.0-only"] },
+    # The official libsignal Rust tree (A2).
+    { name = "libsignal-protocol", allow = ["AGPL-3.0-only"] },
+    { name = "libsignal-core", allow = ["AGPL-3.0-only"] },
+    { name = "libsignal-debug", allow = ["AGPL-3.0-only"] },
+    { name = "signal-crypto", allow = ["AGPL-3.0-only"] },
+    { name = "spqr", allow = ["AGPL-3.0-only"] },
+    # HPKE used inside signal-crypto; MPL-2.0 is file-scoped copyleft,
+    # accepted as a dependency — scoped here, never allowed globally.
+    { name = "hpke-rs", allow = ["MPL-2.0"] },
+    { name = "hpke-rs-crypto", allow = ["MPL-2.0"] },
 ]
+
+[[licenses.clarify]]
+# ring ships a composite LICENSE; standard cargo-deny clarification. Present
+# for when/if ring enters the tree (INV-6 names it as an approved crate).
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
-# INV-6: cryptographic primitives come from libsignal (A2), with ring/rustls
-# acceptable as mainstream audited crates. Anything else crypto-adjacent needs
-# explicit human approval BEFORE it is added — extend this list only with an
-# approval note. Phase 2 seeds `deny` entries for common roll-your-own crypto
-# crates once the libsignal dependency tree is known (so we don't ban its own
-# transitive deps by accident).
+
+# ---------------------------------------------------------------------------
+# INV-6 MECHANICAL ENFORCEMENT: cryptographic primitive crates may exist in
+# the graph ONLY as direct dependencies of the wrapper crates listed with
+# them (libsignal's tree and RustCrypto-internal composition). Adding any of
+# these as a dependency of tezca-* code fails CI. Extending a wrappers list
+# or adding a new primitive requires explicit human approval (Danny) with an
+# approval note in the PR.
+# ---------------------------------------------------------------------------
+deny = [
+    { name = "aes", wrappers = ["aes-gcm-siv", "cbc", "ctr", "libsignal-protocol", "signal-crypto"] },
+    { name = "aes-gcm", wrappers = [] },
+    { name = "aes-gcm-siv", wrappers = ["libsignal-protocol"] },
+    { name = "ctr", wrappers = ["aes-gcm-siv", "libsignal-protocol", "signal-crypto"] },
+    { name = "cbc", wrappers = ["signal-crypto"] },
+    { name = "chacha20poly1305", wrappers = [] },
+    { name = "sha1", wrappers = ["hkdf", "signal-crypto"] },
+    { name = "sha2", wrappers = ["curve25519-dalek", "hkdf", "hmac", "libsignal-core", "libsignal-protocol", "signal-crypto", "spqr"] },
+    { name = "md-5", wrappers = ["hmac", "uuid"] },
+    { name = "hmac", wrappers = ["hkdf", "libsignal-protocol", "signal-crypto", "spqr"] },
+    { name = "hkdf", wrappers = ["libsignal-protocol", "signal-crypto", "spqr"] },
+    { name = "pbkdf2", wrappers = [] },
+    { name = "argon2", wrappers = [] },
+    { name = "curve25519-dalek", wrappers = ["libsignal-core", "libsignal-protocol", "spqr", "x25519-dalek"] },
+    { name = "x25519-dalek", wrappers = ["libsignal-core"] },
+    { name = "ed25519-dalek", wrappers = [] },
+    { name = "rsa", wrappers = [] },
+    { name = "libcrux-ml-kem", wrappers = ["libsignal-protocol", "spqr"] },
+    { name = "hpke-rs", wrappers = ["signal-crypto"] },
+]
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+
+[sources.allow-org]
+# The libsignal tree is git-only (pinned tags, revs sealed in Cargo.lock):
+# signalapp/libsignal, signalapp/curve25519-dalek (their audited dalek fork,
+# mirrored in [patch.crates-io]), signalapp/SparsePostQuantumRatchet.
+github = ["signalapp"]

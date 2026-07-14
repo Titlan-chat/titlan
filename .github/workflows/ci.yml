@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
 #
-# CI per work order §6 Phase 1: build, clippy (deny warnings), rustfmt,
-# cargo audit/deny, Android lint, unit tests, double-build reproducibility
-# check, and SBOM generation (validated on every push; published as release
-# artifacts by release.yml on tagged builds).
+# CI per work order §6: build, clippy (deny warnings), rustfmt, cargo
+# audit/deny (INV-6/INV-7 enforcement), Android lint, unit + integration
+# tests, envelope fuzzing (cargo-fuzz), coverage floor (§8: ≥80% lines on
+# tezca-core), double-build reproducibility, and SBOM generation (validated
+# on every push; published as release artifacts by release.yml on tags).
 
 name: CI
 
@@ -18,6 +19,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # libsignal's build.rs compiles protobuf definitions.
+  PROTOC_APT: protobuf-compiler
 
 jobs:
   invariants:
@@ -32,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
       # rustup reads the pinned toolchain from rust-toolchain.toml
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -41,7 +45,7 @@ jobs:
       - run: cargo test --workspace --locked
 
   rust-supply-chain:
-    name: Rust — cargo deny + audit (INV-7)
+    name: Rust — cargo deny + audit (INV-6/INV-7)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +54,45 @@ jobs:
         with:
           tool: cargo-audit
       - run: cargo audit
+
+  fuzz:
+    name: Fuzz — envelope parsers (INV-4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
+      - run: rustup toolchain install nightly-2026-07-14 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tezca-core/fuzz
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz outer envelope parser
+        working-directory: tezca-core
+        run: cargo +nightly-2026-07-14 fuzz run envelope_parse -- -max_total_time=120
+      - name: Fuzz inner frame parser
+        working-directory: tezca-core
+        run: cargo +nightly-2026-07-14 fuzz run inner_parse -- -max_total_time=120
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: tezca-core/fuzz/artifacts/
+          retention-days: 30
+
+  coverage:
+    name: Coverage — tezca-core ≥ 80% lines (§8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
+      - run: rustup toolchain install && rustup component add llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - run: cargo llvm-cov -p tezca-core --locked --fail-under-lines 80
 
   android:
     name: Android — lint, unit tests, assemble
@@ -71,6 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
       - run: rustup toolchain install
       - uses: actions/setup-java@v4
         with:
@@ -90,6 +134,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/cache-cargo-install-action@v2

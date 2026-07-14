@@ -3,6 +3,9 @@
 
 # Rust
 /target/
+/tezca-core/fuzz/target/
+/tezca-core/fuzz/artifacts/
+/tezca-core/fuzz/coverage/
 
 # Android / Gradle
 /titlan-android/.gradle/
