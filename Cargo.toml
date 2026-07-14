@@ -23,7 +23,7 @@ libsignal-protocol = { version = "0.1.0", git = "https://github.com/signalapp/li
 rusqlite = { version = "0.40.1", features = ["bundled-sqlcipher-vendored-openssl"] }
 # OS CSPRNG handle passed INTO libsignal APIs (their functions require a
 # caller-supplied Rng + CryptoRng). Version matched to libsignal's rand.
-rand = "0.9"
+rand = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 thiserror = "2"
 hex = "0.4"
