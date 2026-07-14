@@ -10,8 +10,12 @@ logging identities. GrapheneOS first, standard Android second.
 Titlan is the first module of the Tezca platform and is published by Oculux
 Technologies LLC.
 
-**Status: Phase 1 — scaffolding and pipeline.** The crates and the app build,
-test, and pass CI, but contain no product functionality yet.
+**Status: Phase 2 — core protocol implemented.** Envelope, PQXDH sessions
+(libsignal), and encrypted storage are in place with full test coverage; the
+relay server and Android UI are still to come.
+
+Titlan is built with an AI-assisted, human-gated development process — see
+[DEVELOPMENT.md](DEVELOPMENT.md) for exactly how, and why we publish that.
 
 ## Repository layout
 

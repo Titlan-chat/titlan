@@ -18,6 +18,7 @@
 .idea/
 *.iml
 .DS_Store
+.claude/
 
 # Generated artifacts (CI uploads these; they never live in the repo)
 /repro-report.txt
