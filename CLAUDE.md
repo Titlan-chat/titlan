@@ -20,6 +20,13 @@ autonomously.
 - Every commit carries the `Co-Authored-By` trailer identifying AI
   authorship. History is never rewritten to obscure it.
 
+## Push boundary
+
+- Push boundary: the agent commits locally but NEVER pushes, merges, or
+  modifies remote state — even where credentials permit it. Every push is
+  performed manually by the maintainer as the human release gate. When work
+  is ready, stop and say so.
+
 ## Dependency rules
 
 - Coupled dependencies: `rand`, and any crate sharing types with libsignal's
