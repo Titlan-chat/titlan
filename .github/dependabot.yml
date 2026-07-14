@@ -3,6 +3,14 @@
 #
 # INV-7 dependency hygiene: automated bump proposals, gated by the full CI
 # matrix (including cargo deny/audit and the reproducible-build job).
+#
+# Updates are GROUPED per ecosystem into a single weekly PR so a week's bumps
+# arrive as one reviewable, CI-gated unit instead of a PR stack.
+#
+# NOTE for any Gradle bump that changes resolved dependencies: Dependabot
+# cannot regenerate our committed lockfiles. The merger must run
+#   ./gradlew :app:assembleDebug :app:assembleRelease :app:lintDebug :app:testDebugUnitTest --write-locks
+# and re-run scripts/repro-build.sh before merging (see docs/build.md).
 
 version: 2
 updates:
@@ -10,13 +18,35 @@ updates:
     directory: /
     schedule:
       interval: weekly
+      day: monday
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
 
   - package-ecosystem: gradle
     directory: /titlan-android
     schedule:
       interval: weekly
+      day: monday
+    groups:
+      android-dependencies:
+        patterns: ["*"]
+    ignore:
+      # AGP 9.x requires Gradle >= 9.5, and Gradle >= 9.6 removed internal
+      # APIs that AGP 8.x depends on (verified 2026-07-14 on PRs #2/#8).
+      # The pair must move TOGETHER as a deliberate, maintainer-approved
+      # toolchain migration — proposed for Phase 4 kickoff, before the real
+      # UI lands. Remove both ignores when that migration is scheduled.
+      - dependency-name: "com.android.application"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "gradle-wrapper"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
