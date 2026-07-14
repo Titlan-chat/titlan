@@ -106,7 +106,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
 
   reproducible-build:
@@ -120,7 +120,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: ./scripts/repro-build.sh
       - uses: actions/upload-artifact@v4
         if: always()
@@ -145,7 +145,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew --no-daemon :app:cyclonedxDirectBom
         working-directory: titlan-android
       - name: Collect SBOMs
