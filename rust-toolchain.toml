@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+#
+# Pinned toolchain for reproducible builds (work order §6 Phase 1).
+# Bump deliberately; the repro-build CI job must stay green across bumps.
+
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]

@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+#
+# cargo-deny configuration — INV-7 (dependency hygiene) and INV-6 (no custom
+# crypto) enforcement point. CI fails on advisories, unknown sources, wildcard
+# versions, and licenses outside the allowlist below.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# tezca-core is Apache-2.0 (A10): its dependency tree must stay permissive so
+# proprietary Tezca suite modules can reuse the core. AGPL is allowed ONLY for
+# our own crates via the exceptions list — never for third-party dependencies.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+]
+exceptions = [
+    { name = "tezca-relay", allow = ["AGPL-3.0-only"] },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# INV-6: cryptographic primitives come from libsignal (A2), with ring/rustls
+# acceptable as mainstream audited crates. Anything else crypto-adjacent needs
+# explicit human approval BEFORE it is added — extend this list only with an
+# approval note. Phase 2 seeds `deny` entries for common roll-your-own crypto
+# crates once the libsignal dependency tree is known (so we don't ban its own
+# transitive deps by accident).
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

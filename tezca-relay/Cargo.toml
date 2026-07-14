@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+
+[package]
+name = "tezca-relay"
+description = "Blind, stateless message relay for the Tezca platform: RAM-only mailboxes with TTL expiry, no database, no disk persistence"
+license = "AGPL-3.0-only"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# Phase 3 (work order §6) adds: axum (or tonic), tokio, and rate limiting.
+# INV-2 (blind relay) and INV-3 (no server-side persistence) constrain every
+# dependency and every logging statement added here.
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
+<!--
+  A11: the user-visible name is "Titlan" everywhere. Company and platform
+  brand strings must not appear in any resource except the future About
+  screen, whose resource names must be prefixed `about_`;
+  scripts/check-invariants.sh enforces this.
+-->
+<resources>
+    <string name="app_name">Titlan</string>
+    <string name="scaffold_placeholder">Titlan</string>
+</resources>

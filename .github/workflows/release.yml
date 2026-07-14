@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+#
+# Tagged-build artifacts per work order §6 Phase 1 and §7:
+#   - tezca-relay release binary (unsigned)
+#   - titlan-android release APK (UNSIGNED — signing keys are external to the
+#     repo and to CI; see README "Release signing")
+#   - CycloneDX SBOMs for core, relay, and the APK dependency closure
+#   - reproducibility report (double build + diff)
+#   - SLSA-style build provenance attestation (GitHub Actions attestations)
+
+name: Release artifacts
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-artifacts:
+    name: Build, SBOM, repro report, provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-cyclonedx
+
+      - name: Build relay (release, locked)
+        run: cargo build --release --locked -p tezca-relay
+
+      - name: Build unsigned release APK
+        run: ./gradlew --no-daemon :app:assembleRelease
+        working-directory: titlan-android
+
+      - name: Generate SBOMs (CycloneDX)
+        run: |
+          cargo cyclonedx --format json
+          (cd titlan-android && ./gradlew --no-daemon :app:cyclonedxDirectBom)
+
+      - name: Reproducibility report (double build + diff)
+        run: ./scripts/repro-build.sh
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp target/release/tezca-relay dist/
+          cp titlan-android/app/build/outputs/apk/release/app-release-unsigned.apk dist/titlan-android-unsigned.apk
+          cp tezca-core/tezca-core.cdx.json dist/
+          cp tezca-relay/tezca-relay.cdx.json dist/
+          cp titlan-android/app/build/reports/cyclonedx-direct/bom.json dist/titlan-android-app.cdx.json
+          cp repro-report.txt dist/
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/tezca-relay
+            dist/titlan-android-unsigned.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: titlan-release-${{ github.ref_name }}
+          path: dist/
+          retention-days: 90

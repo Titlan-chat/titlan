@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+
+[workspace]
+resolver = "3"
+members = ["tezca-core", "tezca-relay"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+
+# Phase 5 targets zero unsafe blocks in core (work order §6). Deny it now;
+# any future exception needs an explicit, justified `#[allow(unsafe_code)]`.
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[profile.release]
+# Strip symbols: smaller artifacts and fewer host-path strings embedded in the
+# binary, which the reproducible-build pipeline (scripts/repro-build.sh) relies on.
+strip = "symbols"

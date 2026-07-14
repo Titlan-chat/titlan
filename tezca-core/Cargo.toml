@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+
+[package]
+name = "tezca-core"
+description = "Shared E2EE core for the Tezca platform: identity, sessions, envelope, storage, relay client (Titlan messenger MVP)"
+license = "Apache-2.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# Guard against accidental crates.io publication while the MVP is in flight.
+publish = false
+
+[dependencies]
+# Phase 2 (work order §6) adds: libsignal (official Rust crate — the ONLY
+# source of cryptographic primitives, per A2/INV-6), rusqlite+sqlcipher (A4),
+# and uniffi (A3). No crypto-adjacent dependency may be added outside that
+# list without explicit human approval (INV-6); deny.toml and cargo-deny in CI
+# gate the dependency tree.
+
+[lints]
+workspace = true
