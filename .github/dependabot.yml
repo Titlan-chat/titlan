@@ -22,6 +22,16 @@ updates:
     groups:
       rust-dependencies:
         patterns: ["*"]
+    ignore:
+      # rand is pinned to libsignal's rand dependency: libsignal's APIs take
+      # caller-supplied RNGs bound to rand 0.9 traits, so rand moves ONLY in
+      # lockstep with a libsignal bump, verified against the RNG trait bounds
+      # in identity/session key generation (tezca-core identity.rs/session.rs
+      # compile + full test suite). Maintainer decision 2026-07-14 (PR #11).
+      # NB: rand is 0.x — Dependabot calls 0.9→0.10 "semver-minor", hence
+      # both entries; 0.9.x patches still flow.
+      - dependency-name: "rand"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: gradle
     directory: /titlan-android

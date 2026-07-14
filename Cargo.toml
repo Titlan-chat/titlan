@@ -22,7 +22,10 @@ libsignal-protocol = { version = "0.1.0", git = "https://github.com/signalapp/li
 # self-contained Android cross-builds later).
 rusqlite = { version = "0.40.1", features = ["bundled-sqlcipher-vendored-openssl"] }
 # OS CSPRNG handle passed INTO libsignal APIs (their functions require a
-# caller-supplied Rng + CryptoRng). Version matched to libsignal's rand.
+# caller-supplied Rng + CryptoRng). PINNED to libsignal's rand major: bump
+# ONLY in lockstep with a libsignal bump, verified against the RNG trait
+# bounds in identity/session key generation (maintainer decision 2026-07-14;
+# see .github/dependabot.yml ignore rule).
 rand = "0.9"
 zeroize = { version = "1", features = ["derive"] }
 thiserror = "2"

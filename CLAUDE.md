@@ -20,6 +20,13 @@ autonomously.
 - Every commit carries the `Co-Authored-By` trailer identifying AI
   authorship. History is never rewritten to obscure it.
 
+## Dependency rules
+
+- Coupled dependencies: `rand`, and any crate sharing types with libsignal's
+  public API, must never be bumped independently — they move only in lockstep
+  with a libsignal bump, verified against the RNG trait bounds in
+  identity/session key generation. See work-order §10.2 ledger.
+
 ## Standing constraints (enforced by CI — see DEVELOPMENT.md)
 
 - No custom cryptography: all primitives via libsignal; `deny.toml` bans
