@@ -88,6 +88,12 @@ Notes on determinism:
   machines only for the same canonical build path and toolchain.
 - Android: pinned AGP/Kotlin via the version catalog, locked dependencies,
   unsigned release output (signing is external and happens offline).
+- **Hashes are only meaningful from clean builds.** Incremental Android
+  builds are not byte-identical to clean ones (observed in practice: an
+  incremental `assembleRelease` produced a different APK hash than the
+  clean build). CI runners and `scripts/repro-build.sh` always build from
+  fresh state; when comparing hashes manually, run
+  `./gradlew clean :app:assembleRelease`.
 
 ## SBOMs (CycloneDX)
 
