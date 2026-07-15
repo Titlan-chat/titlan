@@ -99,8 +99,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # systemd-analyze verify catches typos and unsupported directives in the
-      # hardening block that enforces no-swap / no-core-dump / read-only.
+      # `systemd-analyze verify` resolves the unit's ExecStart and exits
+      # non-zero when the referenced binary is absent — deterministically, on
+      # every run. The relay binary is deployed separately and isn't present in
+      # CI, so this job had been failing since it was introduced. Install a stub
+      # at the ExecStart path so verify checks the hardening DIRECTIVES (no-swap
+      # / no-core-dump / read-only) — its actual purpose — without tripping on
+      # the absent binary.
+      - run: sudo install -m 0755 /dev/stdin /usr/local/bin/tezca-relay <<< '#!/bin/sh'
       - run: systemd-analyze verify --recursive-errors=no deploy/tezca-relay.service
 
   coverage:
