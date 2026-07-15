@@ -20,6 +20,15 @@ autonomously.
 - Every commit carries the `Co-Authored-By` trailer identifying AI
   authorship. History is never rewritten to obscure it.
 
+## Design gate
+
+- A design gate is not passed until the maintainer explicitly approves.
+  Presenting a strong design is not self-authorization to begin work. After
+  presenting a design, stop and do nothing — no proto docs, no tests, no
+  scaffolding — until the maintainer says "approved". This holds even when the
+  design is sound and even when the maintainer resolved the open flags: the
+  explicit "approved" is the gate, not your assessment that it is ready.
+
 ## Push boundary
 
 - Push boundary: the agent commits locally but NEVER pushes, merges, or
