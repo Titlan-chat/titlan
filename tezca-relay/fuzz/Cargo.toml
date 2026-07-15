@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+
+[package]
+name = "tezca-relay-fuzz"
+version = "0.0.0"
+description = "cargo-fuzz targets for the tezca-relay wire parsers (work order §6 Phase 3)"
+license = "AGPL-3.0-only"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tezca-relay = { path = ".." }
+
+[[bin]]
+name = "deposit_admissible"
+path = "fuzz_targets/deposit_admissible.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ack_frame"
+path = "fuzz_targets/ack_frame.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

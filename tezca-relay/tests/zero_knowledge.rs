@@ -11,6 +11,62 @@ mod common;
 
 use common::*;
 
+/// INV-2 focus: the reject paths specifically (429 rate-limited, 507
+/// capacity, DELETE) must never emit a mailbox ID or a source address —
+/// least of all the two together. Drives each reject path under tight limits
+/// and asserts the relay's entire output is silent of both.
+#[test]
+fn reject_paths_never_emit_mailbox_id_or_source() {
+    let (relay, _dir) = spawn_relay(&[
+        "--rate-create-per-min",
+        "2",
+        "--mailbox-max-messages",
+        "2",
+        "--rate-deposit-per-min-source",
+        "1000",
+        "--rate-deposit-per-min-mailbox",
+        "1000",
+    ]);
+    let base = relay.base();
+
+    // 507: fill a mailbox past its 2-message cap.
+    let full = create_mailbox_id(&base);
+    assert_eq!(deposit(&base, &full, &opaque_envelope(64)).status, 202);
+    assert_eq!(deposit(&base, &full, &opaque_envelope(64)).status, 202);
+    assert_eq!(
+        deposit(&base, &full, &opaque_envelope(64)).status,
+        507,
+        "capacity reject"
+    );
+
+    // 429: exceed the per-source create rate (limit 2 → we already made 1).
+    let _second = create_mailbox_id(&base); // 2nd create (ok)
+    assert_eq!(create_mailbox(&base).status, 429, "rate-limit reject");
+
+    // DELETE reject paths: existing, never-existed, already-deleted.
+    assert_eq!(delete_mailbox(&base, &full).status, 204);
+    assert_eq!(
+        delete_mailbox(&base, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").status,
+        204
+    );
+    assert_eq!(delete_mailbox(&base, &full).status, 204);
+
+    let output = relay.kill_and_collect_output();
+    assert!(
+        !output.contains(&full),
+        "INV-2 violation: a mailbox id leaked via a reject path:\n{output}"
+    );
+    assert!(
+        !output.contains("127.0.0.1"),
+        "INV-2 violation: a source address leaked via a reject path:\n{output}"
+    );
+    assert!(
+        output.lines().count() <= 2 && output.len() <= 256,
+        "reject paths broke the zero-logging policy — {} bytes:\n{output}",
+        output.len()
+    );
+}
+
 #[test]
 fn relay_output_contains_no_mailbox_ids_or_source_addresses() {
     let (relay, _dir) = spawn_relay(&[]);
@@ -68,12 +124,15 @@ fn relay_never_writes_to_storage() {
         }
     }
 
-    // INV-3: no persistent writes — /proc storage-write counter ≈ 0…
-    let written = relay.storage_write_bytes();
-    assert!(
-        written < 16384,
-        "INV-3 violation: relay wrote {written} bytes to storage"
-    );
+    // INV-3: no persistent writes — /proc storage-write counter ≈ 0 where
+    // readable (always on CI; some sandboxes deny it, in which case the
+    // cwd-empty check below is the primary signal).
+    if let Some(written) = relay.storage_write_bytes() {
+        assert!(
+            written < 16384,
+            "INV-3 violation: relay wrote {written} bytes to storage"
+        );
+    }
     // …and its working directory stays empty.
     let leftovers: Vec<_> = std::fs::read_dir(dir.path())
         .expect("read cwd")

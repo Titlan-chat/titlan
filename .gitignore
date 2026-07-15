@@ -6,6 +6,9 @@
 /tezca-core/fuzz/target/
 /tezca-core/fuzz/artifacts/
 /tezca-core/fuzz/coverage/
+/tezca-relay/fuzz/target/
+/tezca-relay/fuzz/artifacts/
+/tezca-relay/fuzz/coverage/
 
 # Android / Gradle
 /titlan-android/.gradle/

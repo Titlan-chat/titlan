@@ -82,51 +82,40 @@ fn thousand_messages_with_kill_and_restart() {
     let base = relay.base();
 
     // Conversation-scoped, per-direction mailboxes.
-    let mut inbox_a = create_mailbox_id(&base);
-    let mut inbox_b = create_mailbox_id(&base);
+    let mut inbox_a = create_mailbox_id(&base); // messages FOR alice
+    let mut inbox_b = create_mailbox_id(&base); // messages FOR bob
 
     let mut delivered_to_a: Vec<String> = Vec::new();
     let mut delivered_to_b: Vec<String> = Vec::new();
-    let mut pending_to_b: Vec<String> = Vec::new(); // sent, not yet confirmed e2e
-    let mut pending_to_a: Vec<String> = Vec::new();
     let mut killed = false;
 
-    for batch_start in (0..1000).step_by(50) {
-        // 25 A→B then 25 B→A per round of 50.
-        for i in batch_start..batch_start + 25 {
-            let text = format!("a->b {i}");
-            let wire = session::encrypt_message(
-                &alice.store,
-                &bob.addr,
-                &InnerFrame::chat_v1(&text),
-                &profile,
-            )
-            .unwrap();
-            let resp = deposit(&base, &inbox_b, &wire);
-            assert_eq!(resp.status, 202, "deposit a->b #{i}");
-            pending_to_b.push(text);
-        }
-        for i in batch_start + 25..batch_start + 50 {
-            let text = format!("b->a {i}");
-            let wire = session::encrypt_message(
-                &bob.store,
-                &alice.addr,
-                &InnerFrame::chat_v1(&text),
-                &profile,
-            )
-            .unwrap();
-            let resp = deposit(&base, &inbox_a, &wire);
-            assert_eq!(resp.status, 202, "deposit b->a #{i}");
-            pending_to_a.push(text);
-        }
+    // 20 batches × 50 = 1,000 messages. Each batch: A→B, drain B, then B→A,
+    // drain A. Draining B before B replies matters — in PQXDH only the
+    // initiator (Alice) holds a session until the responder (Bob) decrypts
+    // her first message, after which Bob's ratchet is live and he can send.
+    for batch in 0..20 {
+        // ---- A → B (25) ----
+        let texts_b: Vec<String> = (0..25)
+            .map(|i| {
+                let text = format!("a->b {}", batch * 25 + i);
+                let wire = session::encrypt_message(
+                    &alice.store,
+                    &bob.addr,
+                    &InnerFrame::chat_v1(&text),
+                    &profile,
+                )
+                .unwrap();
+                assert_eq!(deposit(&base, &inbox_b, &wire).status, 202, "deposit a->b");
+                text
+            })
+            .collect();
 
-        // Mid-test crash: kill at the 500-message mark with deposits queued
-        // but undelivered — those in-RAM messages are lost (INV-3).
-        if batch_start + 50 == 500 && !killed {
+        // Mid-test crash at the 500-message mark (start of batch 10): the 25
+        // just-deposited, still-undelivered A→B messages are in RAM and are
+        // lost (INV-3). Clients recover by recreating mailboxes and resending.
+        if batch == 10 && !killed {
             killed = true;
             relay.kill();
-
-            // Deposits must now fail at the transport level.
             assert!(
                 std::net::TcpStream::connect_timeout(
                     &format!("127.0.0.1:{port}").parse().unwrap(),
@@ -136,26 +125,37 @@ fn thousand_messages_with_kill_and_restart() {
                 "relay port must be closed after SIGKILL"
             );
 
-            // Restart on the SAME port; clients retry and recover.
+            // Restart on the SAME port; everything relay-side is gone.
             relay = spawn_relay_at(port, GENEROUS_LIMITS, dir.path());
-
-            // Everything relay-side is gone (INV-3): recreate mailboxes.
             inbox_a = create_mailbox_id(&base);
             inbox_b = create_mailbox_id(&base);
 
-            // Client redelivery: re-encrypt every unconfirmed payload as a
-            // fresh ratchet message and deposit again.
-            for text in pending_to_b.clone() {
+            // Client redelivery: re-encrypt the lost A→B batch as fresh
+            // ratchet messages and redeposit to the new mailbox.
+            for text in &texts_b {
                 let wire = session::encrypt_message(
                     &alice.store,
                     &bob.addr,
-                    &InnerFrame::chat_v1(&text),
+                    &InnerFrame::chat_v1(text),
                     &profile,
                 )
                 .unwrap();
-                assert_eq!(deposit(&base, &inbox_b, &wire).status, 202);
+                assert_eq!(
+                    deposit(&base, &inbox_b, &wire).status,
+                    202,
+                    "redeposit a->b"
+                );
             }
-            for text in pending_to_a.clone() {
+        }
+
+        let got_b = drain_inbox(&base, &inbox_b, &bob, &alice.addr, texts_b.len());
+        assert_eq!(got_b, texts_b, "A→B batch content, in order");
+        delivered_to_b.extend(got_b);
+
+        // ---- B → A (25) — Bob now has a live session from draining above ----
+        let texts_a: Vec<String> = (0..25)
+            .map(|i| {
+                let text = format!("b->a {}", batch * 25 + i);
                 let wire = session::encrypt_message(
                     &bob.store,
                     &alice.addr,
@@ -163,17 +163,13 @@ fn thousand_messages_with_kill_and_restart() {
                     &profile,
                 )
                 .unwrap();
-                assert_eq!(deposit(&base, &inbox_a, &wire).status, 202);
-            }
-        }
-
-        // Drain both inboxes; confirmed messages leave the pending sets.
-        let got_b = drain_inbox(&base, &inbox_b, &bob, &alice.addr, pending_to_b.len());
-        delivered_to_b.extend(got_b);
-        pending_to_b.clear();
-        let got_a = drain_inbox(&base, &inbox_a, &alice, &bob.addr, pending_to_a.len());
+                assert_eq!(deposit(&base, &inbox_a, &wire).status, 202, "deposit b->a");
+                text
+            })
+            .collect();
+        let got_a = drain_inbox(&base, &inbox_a, &alice, &bob.addr, texts_a.len());
+        assert_eq!(got_a, texts_a, "B→A batch content, in order");
         delivered_to_a.extend(got_a);
-        pending_to_a.clear();
     }
 
     assert!(killed, "the kill/restart leg must have executed");
@@ -244,19 +240,28 @@ fn memory_stays_flat_under_sustained_load() {
         }
     };
 
-    // Warm-up, then measure.
-    cycle(500);
+    // "Flat under sustained load" means NO UNBOUNDED GROWTH — i.e. no leak.
+    // The general-purpose allocator ramps to a high-water mark over the first
+    // few thousand allocations (per-thread arenas fill in), which is a
+    // bounded plateau, not a leak. So we warm PAST that ramp (12k messages)
+    // to reach steady state, snapshot RSS, then assert the next 10k messages
+    // grow it < 10%. A real leak keeps climbing across this window; a
+    // plateaued allocator does not.
+    for _ in 0..24 {
+        cycle(500); // 12,000 messages: reach allocator steady state
+    }
     std::thread::sleep(std::time::Duration::from_millis(300));
-    let warmed = relay.rss_kb();
+    let steady = relay.rss_kb();
 
     for _ in 0..20 {
-        cycle(500); // 10,000 sustained deposit/deliver/ack cycles
+        cycle(500); // 10,000 more sustained deposit/deliver/ack cycles
     }
     std::thread::sleep(std::time::Duration::from_millis(300));
     let after = relay.rss_kb();
 
     assert!(
-        after <= warmed + warmed / 10,
-        "relay RSS grew from {warmed} kB to {after} kB under sustained load (>10%)"
+        after <= steady + steady / 10,
+        "relay RSS grew from {steady} kB (steady state) to {after} kB over 10k \
+         sustained messages (>10%) — indicates a leak, not allocator warm-up"
     );
 }

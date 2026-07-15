@@ -4,8 +4,9 @@
 [workspace]
 resolver = "3"
 members = ["tezca-core", "tezca-relay"]
-# The fuzz crate is its own workspace (cargo-fuzz convention, nightly-only).
-exclude = ["tezca-core/fuzz"]
+# The fuzz crates are their own workspaces (cargo-fuzz convention,
+# nightly-only).
+exclude = ["tezca-core/fuzz", "tezca-relay/fuzz"]
 
 [workspace.package]
 version = "0.1.0"
@@ -36,6 +37,17 @@ async-trait = "0.1"
 futures = { version = "0.3", default-features = false, features = ["executor"] }
 tempfile = "3"
 proptest = "1"
+# Relay server stack (maintainer-approved F2). rustls runs on the ring
+# provider (INV-6 names ring); aws-lc-rs is deliberately kept out of the
+# tree via default-features = false everywhere.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws"] }
+axum-server = { version = "0.8.0", default-features = false, features = ["tls-rustls-no-provider"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
+bytes = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "mm"] }
+tungstenite = "0.28"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 
 # Mirror of libsignal's own [patch.crates-io] (patches do not propagate from
 # dependencies): their audited curve25519-dalek fork. Same tag as v0.97.2.

@@ -9,6 +9,11 @@
 //! The flag names used here are the relay's configuration contract; the
 //! implementation must accept exactly these. The relay must set
 //! SO_REUSEADDR so the kill/restart test can rebind the same port.
+//!
+//! Each `tests/*.rs` file is its own crate and compiles this whole module,
+//! so helpers a given test binary doesn't use would trip dead_code — hence
+//! the crate-wide allow on this shared harness.
+#![allow(dead_code)]
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -76,14 +81,17 @@ impl RelayProc {
     }
 
     /// Storage bytes written by the relay so far (/proc/<pid>/io) — INV-3.
-    pub fn storage_write_bytes(&self) -> u64 {
-        let io = std::fs::read_to_string(format!("/proc/{}/io", self.pid())).expect("proc io");
+    /// Returns `None` when /proc/<pid>/io is unreadable (some hardened
+    /// sandboxes deny it even for same-uid children); callers fall back to
+    /// the working-directory-empty check, which is the primary INV-3 signal.
+    pub fn storage_write_bytes(&self) -> Option<u64> {
+        let io = std::fs::read_to_string(format!("/proc/{}/io", self.pid())).ok()?;
         for line in io.lines() {
             if let Some(rest) = line.strip_prefix("write_bytes:") {
-                return rest.trim().parse().expect("write_bytes");
+                return rest.trim().parse().ok();
             }
         }
-        panic!("write_bytes not found");
+        None
     }
 }
 

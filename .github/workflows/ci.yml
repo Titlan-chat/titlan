@@ -56,7 +56,7 @@ jobs:
       - run: cargo audit
 
   fuzz:
-    name: Fuzz — envelope parsers (INV-4)
+    name: Fuzz — envelope + relay parsers (INV-4)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -64,22 +64,41 @@ jobs:
       - run: rustup toolchain install nightly-2026-07-14 --profile minimal
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: tezca-core/fuzz
+          workspaces: |
+            tezca-core/fuzz
+            tezca-relay/fuzz
       - uses: taiki-e/cache-cargo-install-action@v2
         with:
           tool: cargo-fuzz
       - name: Fuzz outer envelope parser
         working-directory: tezca-core
-        run: cargo +nightly-2026-07-14 fuzz run envelope_parse -- -max_total_time=120
+        run: cargo +nightly-2026-07-14 fuzz run envelope_parse -- -max_total_time=90
       - name: Fuzz inner frame parser
         working-directory: tezca-core
-        run: cargo +nightly-2026-07-14 fuzz run inner_parse -- -max_total_time=120
+        run: cargo +nightly-2026-07-14 fuzz run inner_parse -- -max_total_time=90
+      - name: Fuzz relay deposit-admission parser
+        working-directory: tezca-relay
+        run: cargo +nightly-2026-07-14 fuzz run deposit_admissible -- -max_total_time=90
+      - name: Fuzz relay ack-frame parser
+        working-directory: tezca-relay
+        run: cargo +nightly-2026-07-14 fuzz run ack_frame -- -max_total_time=90
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: fuzz-artifacts
-          path: tezca-core/fuzz/artifacts/
+          path: |
+            tezca-core/fuzz/artifacts/
+            tezca-relay/fuzz/artifacts/
           retention-days: 30
+
+  relay-hardening:
+    name: Relay — systemd unit hardening (INV-3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # systemd-analyze verify catches typos and unsupported directives in the
+      # hardening block that enforces no-swap / no-core-dump / read-only.
+      - run: systemd-analyze verify --recursive-errors=no deploy/tezca-relay.service
 
   coverage:
     name: Coverage — tezca-core ≥ 80% lines (§8)

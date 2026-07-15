@@ -73,9 +73,33 @@ if [ -n "$naming_hits" ]; then
   fail=1
 fi
 
+# --- 4. Relay zero-logging / no-filesystem policy (INV-2, INV-3) -------------
+# The relay must not log and must not touch the filesystem. Startup-only
+# stderr is allowed on ONE line in main.rs (the "listening" string and usage
+# errors); everything else is forbidden in tezca-relay/src.
+if [ -d tezca-relay/src ]; then
+  log_hits=$(grep -rnE 'tracing::|log::(trace|debug|info|warn|error)|println!|eprint(ln)?!' \
+      tezca-relay/src 2>/dev/null \
+    | grep -v 'src/main.rs:' || true)
+  if [ -n "$log_hits" ]; then
+    echo "INV-2 violation: logging/print statements outside the relay startup path:"
+    echo "$log_hits"
+    fail=1
+  fi
+  # Filesystem access from the relay (mailboxes are RAM-only, INV-3). The
+  # /proc reads live in the TEST harness, not src, so this stays clean.
+  fs_hits=$(grep -rnE 'std::fs::|File::(open|create)|OpenOptions|fs::write|fs::read' \
+      tezca-relay/src 2>/dev/null || true)
+  if [ -n "$fs_hits" ]; then
+    echo "INV-3 violation: filesystem access in relay source:"
+    echo "$fs_hits"
+    fail=1
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming)."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs)."

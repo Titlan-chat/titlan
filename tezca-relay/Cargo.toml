@@ -10,19 +10,40 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+# Small library surface so the parsers (the code touching attacker bytes)
+# are unit-testable and fuzzable; the binary wraps it.
+name = "tezca_relay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tezca-relay"
+path = "src/main.rs"
+
 [dependencies]
-# Phase 3 (work order §6) adds: axum (or tonic), tokio, and rate limiting.
 # INV-2 (blind relay) and INV-3 (no server-side persistence) constrain every
-# dependency and every logging statement added here.
+# dependency here. NO logging framework is present by policy: tracing exists
+# only as an inert transitive of axum/tower (no subscriber is ever
+# installed), and scripts/check-invariants.sh forbids log macros in src/.
+axum = { workspace = true }
+axum-server = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+rustls = { workspace = true }
+rand = { workspace = true }
+rustix = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 # Acceptance tests drive a real relay child process end-to-end with real
 # tezca-core clients (work order §6 Phase 3 acceptance).
 tezca-core = { path = "../tezca-core" }
 tempfile = { workspace = true }
-# WebSocket test client. NOTE: tungstenite requires `sha1` (RFC 6455
-# handshake) — needs the maintainer-approved wrapper extension in deny.toml.
-tungstenite = "0.28"
+# WebSocket test client. sha1 comes with it: RFC 6455 requires SHA-1 in the
+# WS opening handshake — maintainer-approved wrapper in deny.toml.
+tungstenite = { workspace = true }
+# Self-signed certs for the TLS smoke test (ring-backed; INV-6 names ring).
+rcgen = { workspace = true }
 
 [lints]
 workspace = true

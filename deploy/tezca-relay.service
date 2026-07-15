@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+#
+# systemd unit for tezca-relay. The hardening block enforces INV-3 at the OS
+# level (no swap of mailbox memory, no core dumps, read-only filesystem) and
+# is verified by `systemd-analyze verify` in CI.
+
+[Unit]
+Description=Tezca blind message relay (Titlan)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/tezca-relay --listen 0.0.0.0:8443 --tls-cert /etc/tezca-relay/fullchain.pem --tls-key /etc/tezca-relay/privkey.pem
+DynamicUser=yes
+Restart=on-failure
+
+# INV-3: no swap of mailbox memory, no core dumps.
+MemorySwapMax=0
+LimitCORE=0
+# Grant mlockall (the binary calls it best-effort).
+LimitMEMLOCK=infinity
+
+# Filesystem: nothing to write (RAM-only mailboxes).
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/
+PrivateTmp=yes
+
+# Privilege reduction.
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
