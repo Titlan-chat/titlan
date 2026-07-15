@@ -11,13 +11,34 @@
 //! §10.7 recovery, and per-conversation pinning are the green implementation.
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use tokio::runtime::Runtime;
 
 use crate::Result;
 use crate::relay_client::Engine;
 use crate::storage::{DbKey, Store, StoredMessage};
+
+/// One process-wide async runtime shared by every [`TitlanClient`].
+///
+/// A device runs a single identity in production, but tests (and any host
+/// that opens several databases) create many clients. Giving each its own
+/// multi-thread runtime makes the live OS-thread count scale with the number
+/// of clients, which exhausts `RLIMIT_NPROC` on constrained hosts (CI's 2-core
+/// runners) and makes tokio panic with "OS can't spawn worker thread". A
+/// single bounded runtime keeps the worker-thread count constant regardless of
+/// how many clients are open. Handles are cheap to clone and safe to share.
+fn shared_runtime() -> &'static Runtime {
+    static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .thread_name("tezca-core")
+            .build()
+            .expect("build shared tezca-core runtime")
+    })
+}
 
 /// Opaque per-conversation identifier (16 random bytes; matches storage).
 pub type ConversationId = [u8; 16];
@@ -77,7 +98,6 @@ impl PairingPayload {
 pub struct TitlanClient {
     store: Arc<Store>,
     my_relay: String,
-    runtime: Runtime,
     engine: Arc<Engine>,
 }
 
@@ -87,19 +107,14 @@ impl TitlanClient {
     /// new conversations (INV-5: every conversation may override it).
     pub fn open(path: &Path, key: &DbKey, my_relay_url: &str) -> Result<TitlanClient> {
         let store = Arc::new(Store::open(path, key)?);
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| crate::CoreError::Network(e.to_string()))?;
         let engine = Engine::new(
             store.clone(),
             my_relay_url.to_owned(),
-            runtime.handle().clone(),
+            shared_runtime().handle().clone(),
         )?;
         Ok(TitlanClient {
             store,
             my_relay: my_relay_url.to_owned(),
-            runtime,
             engine,
         })
     }
@@ -123,7 +138,7 @@ impl TitlanClient {
     /// Exports the pairing payload and creates the single-use pairing inbox on
     /// the default relay (`proto/pairing.md`).
     pub fn export_pairing_payload(&self) -> Result<PairingPayload> {
-        let pairing_inbox = self.runtime.block_on(self.engine.create_mailbox())?;
+        let pairing_inbox = shared_runtime().block_on(self.engine.create_mailbox())?;
         self.engine.spawn_pairing(pairing_inbox.clone());
         let bundle = crate::identity::export_prekey_bundle(&self.store)?;
         let payload =
@@ -135,7 +150,7 @@ impl TitlanClient {
     /// sends `pair-ack/1`, awaits the peer's reply, and records the
     /// conversation. Returns its id. `PairingUnavailable` if the QR is stale.
     pub fn begin_pairing_from_scan(&self, payload: &[u8]) -> Result<ConversationId> {
-        let conv = self.runtime.block_on(self.engine.begin_pairing(payload))?;
+        let conv = shared_runtime().block_on(self.engine.begin_pairing(payload))?;
         self.engine.spawn_conversation(conv);
         Ok(conv)
     }
@@ -173,7 +188,7 @@ impl TitlanClient {
     /// Queues and sends a `chat/1` message (persists `pending`, deposits,
     /// marks sent; retried by the sync loop on failure).
     pub fn send_chat(&self, id: &ConversationId, text: &str) -> Result<()> {
-        self.runtime.block_on(self.engine.send_chat(id, text))
+        shared_runtime().block_on(self.engine.send_chat(id, text))
     }
 
     /// Starts per-conversation receive-sync (WebSocket + reconnect/backoff +
@@ -190,7 +205,8 @@ impl TitlanClient {
         Ok(())
     }
 
-    /// Stops all sync tasks (they end when the runtime is dropped).
+    /// Stops all sync tasks. They currently run on the shared runtime and end
+    /// when their subscriptions error out; explicit cancellation is post-MVP.
     pub fn stop_sync(&self) -> Result<()> {
         Ok(())
     }

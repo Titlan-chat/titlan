@@ -2707,6 +2707,7 @@ dependencies = [
  "libsignal-protocol",
  "proptest",
  "rand 0.9.5",
+ "rcgen",
  "reqwest",
  "ring",
  "rusqlite",

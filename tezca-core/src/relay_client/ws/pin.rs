@@ -119,3 +119,84 @@ impl ServerCertVerifier for PinVerifier {
             .supported_schemes()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Generates a self-signed leaf and returns its DER plus the SHA-256 the
+    /// verifier would pin it to.
+    fn self_signed() -> (CertificateDer<'static>, [u8; 32]) {
+        let cert = rcgen::generate_simple_self_signed(vec!["relay.example".to_string()])
+            .expect("generate self-signed cert")
+            .cert;
+        let der = cert.der().clone();
+        let digest = ring::digest::digest(&ring::digest::SHA256, der.as_ref());
+        let mut pin = [0u8; 32];
+        pin.copy_from_slice(digest.as_ref());
+        (der, pin)
+    }
+
+    fn verifier(pin: [u8; 32]) -> PinVerifier {
+        PinVerifier {
+            pin,
+            provider: Arc::new(rustls::crypto::ring::default_provider()),
+        }
+    }
+
+    fn server_name() -> ServerName<'static> {
+        ServerName::try_from("relay.example").expect("server name")
+    }
+
+    #[test]
+    fn pinned_certificate_is_accepted() {
+        let (der, pin) = self_signed();
+        let name = server_name();
+        let result = verifier(pin).verify_server_cert(
+            &der,
+            &[],
+            &name,
+            &[],
+            UnixTime::since_unix_epoch(std::time::Duration::from_secs(1_800_000_000)),
+        );
+        assert!(result.is_ok(), "cert matching the pin must be accepted");
+    }
+
+    #[test]
+    fn certificate_not_matching_pin_is_rejected() {
+        // The presented cert is legitimate and self-consistent, but its DER
+        // hash differs from the pin the conversation was configured with — the
+        // exact MITM/cert-swap case pinning exists to stop.
+        let (presented, _presented_pin) = self_signed();
+        let (_other, expected_pin) = self_signed();
+        assert_ne!(
+            ring::digest::digest(&ring::digest::SHA256, presented.as_ref()).as_ref(),
+            expected_pin,
+            "the two self-signed certs must differ (sanity)"
+        );
+        let name = server_name();
+        let result = verifier(expected_pin).verify_server_cert(
+            &presented,
+            &[],
+            &name,
+            &[],
+            UnixTime::since_unix_epoch(std::time::Duration::from_secs(1_800_000_000)),
+        );
+        let err = result.expect_err("cert not matching the pin must be rejected");
+        assert!(
+            matches!(err, rustls::Error::General(_)),
+            "rejection is a pin mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn advertises_the_providers_signature_schemes() {
+        // The verifier must offer the ring provider's schemes, else the
+        // handshake would negotiate nothing and every wss:// connection fail.
+        let (_der, pin) = self_signed();
+        assert!(
+            !verifier(pin).supported_verify_schemes().is_empty(),
+            "must advertise the ring provider's signature schemes"
+        );
+    }
+}

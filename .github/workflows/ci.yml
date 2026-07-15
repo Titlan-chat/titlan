@@ -120,7 +120,16 @@ jobs:
       - uses: taiki-e/cache-cargo-install-action@v2
         with:
           tool: cargo-llvm-cov
-      - run: cargo llvm-cov -p tezca-core --locked --fail-under-lines 80
+      # Run the WHOLE workspace's tests: tezca-core's relay client is
+      # exercised end-to-end by tezca-relay's acceptance suite, which `-p
+      # tezca-core` would skip (leaving relay_client/ at ~0% and the gate
+      # unmeetable without excluding code). The REPORT stays scoped to
+      # tezca-core — the §8 gate's subject, and the same scope `-p` reported —
+      # via the filename filter: tezca-relay's own src/ shows phantom 0% here
+      # because the harness SIGKILLs relay child processes before they can
+      # flush LLVM profile data (its real coverage gate is its acceptance
+      # tests, which run in the `test` job).
+      - run: cargo llvm-cov --workspace --locked --ignore-filename-regex 'tezca-relay/src/' --fail-under-lines 80
 
   android:
     name: Android — lint, unit tests, assemble
