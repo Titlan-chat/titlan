@@ -103,6 +103,14 @@ deny = [
     { name = "rsa", wrappers = [] },
     { name = "libcrux-ml-kem", wrappers = ["libsignal-protocol", "spqr"] },
     { name = "hpke-rs", wrappers = ["signal-crypto"] },
+    # Single-TLS-provider policy (Phase 4a flag 2a): rustls runs on **ring**
+    # across the whole tree (INV-6 names ring). aws-lc-rs is the other rustls
+    # provider and must NEVER enter — the Phase 4a client stack (reqwest,
+    # tokio-tungstenite) will be configured with a ring-backed rustls, and
+    # this ban mechanically enforces "one provider, ring" the moment those
+    # deps land in green. No wrappers: aws-lc has no legitimate parent here.
+    { name = "aws-lc-rs", wrappers = [] },
+    { name = "aws-lc-sys", wrappers = [] },
 ]
 
 [sources]

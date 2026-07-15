@@ -71,6 +71,12 @@ pub enum CoreError {
     /// Underlying storage failure.
     #[error("storage error: {0}")]
     Storage(String),
+    /// The pairing target is gone: the single-use pairing inbox referenced by
+    /// a scanned payload has been consumed (retired after a successful pairing)
+    /// or expired — a deposit to it returned 404. This is the "stale-QR-dead"
+    /// condition (`proto/pairing.md`): a captured QR cannot re-pair.
+    #[error("pairing inbox unavailable (consumed or expired)")]
+    PairingUnavailable,
     /// Underlying libsignal protocol failure.
     #[error("protocol error: {0}")]
     Signal(String),

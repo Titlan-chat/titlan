@@ -16,6 +16,7 @@
 //! Kotlin consumes this crate through UniFFI bindings (A3, Phase 4); Kotlin
 //! stays UI-only.
 
+pub mod client;
 pub mod config;
 pub mod envelope;
 pub mod error;

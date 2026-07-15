@@ -58,8 +58,14 @@ cryptographic operation runs (`PayloadTooLarge`).
 | `0x02` | `posture` | **first-class reserved** — Tezca suite |
 | `0x03` | `policy` | **first-class reserved** — Tezca suite |
 | `0x04` | `alert` | **first-class reserved** — Tezca suite |
-| `0x05–0x7F` | — | unassigned; allocation requires an entry here |
+| `0x05` | `pair-ack` | pairing control (Phase 4a): scanner's reply coordinates — see `pairing.md` |
+| `0x06` | `mailbox-update` | pairing control (Phase 4a): one-sided inbox recovery — see `pairing.md` |
+| `0x07–0x7F` | — | unassigned; allocation requires an entry here |
 | `0x80–0xFF` | — | private/experimental; never allocated by this registry |
+
+`0x05` (`pair-ack`) and `0x06` (`mailbox-update`) were **assigned by the
+maintainer on 2026-07-15** (this document is the numbering authority; byte
+assignment is a maintainer decision).
 
 **First-class reserved** means: the frame encodes, decodes, and round-trips
 in every conforming implementation today. A client that recognizes a type but
