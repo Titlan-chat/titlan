@@ -82,13 +82,15 @@ deny = [
     # (Sec-WebSocket-Accept). Protocol framing mandated by the standard, not a
     # cryptographic choice of ours — no confidentiality/integrity property of
     # Titlan rests on it. Maintainer-approved 2026-07-14 for the WS handshake
-    # on both the test client and the relay server side. Direct parents:
-    #   - axum        : relay server WS handshake (server side)
-    #   - tungstenite : test client, and transitively under axum's
-    #                   tokio-tungstenite (server side)
-    #   - signal-crypto: libsignal-internal (NOT WebSocket; part of the
-    #                    audited libsignal tree)
-    { name = "sha1", wrappers = ["signal-crypto", "tungstenite", "axum"] },
+    # (test client + relay server) and pre-existing for the libsignal tree.
+    # Each wrapper below is a genuine DIRECT parent of sha1 (cargo tree -i
+    # sha1); the list is exactly those parents — remove one and cargo-deny
+    # errors. No entry is here to broaden the allowlist.
+    { name = "sha1", wrappers = [
+        "axum",          # relay server-side RFC 6455 WS handshake
+        "tungstenite",   # test WS client; also sha1's direct parent under axum's tokio-tungstenite
+        "signal-crypto", # libsignal-internal (audited tree), NOT WebSocket
+    ] },
     { name = "sha2", wrappers = ["curve25519-dalek", "hkdf", "hmac", "libsignal-core", "libsignal-protocol", "signal-crypto", "spqr"] },
     { name = "md-5", wrappers = ["hmac", "uuid"] },
     { name = "hmac", wrappers = ["hkdf", "libsignal-protocol", "signal-crypto", "spqr"] },
