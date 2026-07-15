@@ -46,7 +46,7 @@ tokio = { version = "1", default-features = false, features = ["rt-multi-thread"
 bytes = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustix = { version = "1", default-features = false, features = ["std", "process", "mm"] }
-tungstenite = "0.28"
+tungstenite = "0.30"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 # Phase 4a relay client (maintainer-approved F2/2a). All TLS runs on the ring
 # provider; aws-lc-rs is kept out of the tree (default-features=false + the
