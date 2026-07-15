@@ -71,6 +71,10 @@ pub enum CoreError {
     /// Underlying storage failure.
     #[error("storage error: {0}")]
     Storage(String),
+    /// The relay could not be reached (transport/connection failure — distinct
+    /// from a 404, which is a clean "mailbox gone" signal).
+    #[error("network error: {0}")]
+    Network(String),
     /// The pairing target is gone: the single-use pairing inbox referenced by
     /// a scanned payload has been consumed (retired after a successful pairing)
     /// or expired — a deposit to it returned 404. This is the "stale-QR-dead"

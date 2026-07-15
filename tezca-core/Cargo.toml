@@ -24,6 +24,15 @@ thiserror = { workspace = true }
 hex = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
+# Phase 4a relay client + UniFFI surface (F2/2a; ring-only TLS).
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
+ring = { workspace = true }
+uniffi = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

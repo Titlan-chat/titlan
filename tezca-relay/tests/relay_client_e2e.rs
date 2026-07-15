@@ -105,17 +105,26 @@ fn pair_and_exchange_through_relay() {
     assert!(bob_st.saw(&ConnectionState::Online));
 }
 
-/// Messages sent while the relay is down are redelivered on reconnect.
+/// A message alice sends while she can't reach the send target is HELD as
+/// pending (not lost, INV-3 client side) and redelivered once the route
+/// recovers. Two relays: killing bob's relay makes alice's deposit fail
+/// (send target unreachable) while alice's own inbox survives, so recovery is
+/// one-sided (bob re-announces a fresh inbox) rather than total loss — the
+/// scenario §10.7 option (ii) actually supports for redelivery. (A single
+/// shared relay restarting is total loss → re-pair, covered separately.)
 #[test]
 fn pending_messages_deliver_after_reconnect() {
     let dir = TempDir::new().unwrap();
-    let d = TempDir::new().unwrap();
-    let port = free_port();
-    let mut relay = spawn_relay_at(port, GENEROUS_LIMITS, d.path());
-    let url = format!("ws://{}", relay.base());
+    let da = TempDir::new().unwrap();
+    let db = TempDir::new().unwrap();
+    let relay_a = spawn_relay_at(free_port(), GENEROUS_LIMITS, da.path());
+    let pb = free_port();
+    let mut relay_b = spawn_relay_at(pb, GENEROUS_LIMITS, db.path());
+    let url_a = format!("ws://{}", relay_a.base());
+    let url_b = format!("ws://{}", relay_b.base());
 
-    let alice = new_client(&dir, "alice.db", &url);
-    let bob = new_client(&dir, "bob.db", &url);
+    let alice = new_client(&dir, "alice.db", &url_a);
+    let bob = new_client(&dir, "bob.db", &url_b);
     let bob_rx = Arc::new(Inbox::default());
     let bob_st = Arc::new(States::default());
     bob.start_sync(bob_st.clone(), bob_rx.clone()).unwrap();
@@ -126,15 +135,23 @@ fn pending_messages_deliver_after_reconnect() {
     let payload = bob.export_pairing_payload().unwrap();
     let conv_a = alice.begin_pairing_from_scan(payload.as_bytes()).unwrap();
 
-    // Relay down: send is queued (pending), not lost.
-    relay.kill();
+    // Bob's relay down: alice's deposit to his inbox fails → held pending.
+    relay_b.kill();
     alice.send_chat(&conv_a, "queued while offline").unwrap();
+    assert!(
+        alice
+            .messages(&conv_a)
+            .unwrap()
+            .iter()
+            .any(|m| m.body == b"queued while offline"),
+        "the message must be held locally, not lost"
+    );
 
-    // Relay back on the same port: client reconnects and flushes pending.
-    relay = spawn_relay_at(port, GENEROUS_LIMITS, d.path());
+    // Bob's relay back: his inbox recovery re-announces to alice's surviving
+    // inbox, and alice flushes the pending message.
+    relay_b = spawn_relay_at(pb, GENEROUS_LIMITS, db.path());
     wait_until(|| bob_rx.texts().contains(&"queued while offline".to_string()));
-    assert!(bob_st.saw(&ConnectionState::Online));
-    drop(relay);
+    drop((relay_a, relay_b));
 }
 
 /// §10.7 one-sided loss: only one party's relay restarts; the recovered side
@@ -216,23 +233,32 @@ fn total_mailbox_loss_surfaces_re_pair_required() {
     drop(relay);
 }
 
-/// Schema v2 adds a nullable `relay_pin`; the pin round-trips per conversation.
+/// Schema v2 adds a nullable `relay_pin`; the pin round-trips on a real
+/// conversation (per-conversation cert pinning, optional-but-designed).
 #[test]
 fn schema_v2_relay_pin_migration() {
     let dir = TempDir::new().unwrap();
-    let key = DbKey::generate();
-    let client =
-        TitlanClient::open(&dir.path().join("s.db"), &key, "ws://relay.invalid/v1").unwrap();
-    client.initialize_identity().unwrap();
-    assert_eq!(client.schema_version().unwrap(), 2, "migration v2 applied");
+    let d = TempDir::new().unwrap();
+    let relay = spawn_relay_at(free_port(), GENEROUS_LIMITS, d.path());
+    let url = format!("ws://{}", relay.base());
 
-    let convs = client.list_conversations().unwrap();
-    let conv = convs.first().copied().unwrap_or([0u8; 16]);
-    assert_eq!(client.conversation_pin(&conv).unwrap(), None);
-    client
-        .set_conversation_pin(&conv, Some([0xAB; 32]))
+    let alice = new_client(&dir, "alice.db", &url);
+    assert_eq!(alice.schema_version().unwrap(), 2, "migration v2 applied");
+
+    // Need a conversation to pin: pair with Bob.
+    let bob = new_client(&dir, "bob.db", &url);
+    bob.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
         .unwrap();
-    assert_eq!(client.conversation_pin(&conv).unwrap(), Some([0xAB; 32]));
+    alice
+        .start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+    let payload = bob.export_pairing_payload().unwrap();
+    let conv = alice.begin_pairing_from_scan(payload.as_bytes()).unwrap();
+
+    assert_eq!(alice.conversation_pin(&conv).unwrap(), None);
+    alice.set_conversation_pin(&conv, Some([0xAB; 32])).unwrap();
+    assert_eq!(alice.conversation_pin(&conv).unwrap(), Some([0xAB; 32]));
+    drop(relay);
 }
 
 /// A captured QR is consumed after the legitimate pairing retires its

@@ -90,6 +90,20 @@ pub(crate) fn migrate(conn: &rusqlite::Connection) -> Result<()> {
         .map_err(sql_err)?;
         tx.commit().map_err(sql_err)?;
     }
+
+    if current < 2 {
+        // v2 (Phase 4a): per-conversation TLS SPKI pin (cert pinning is
+        // optional-but-designed; NULL = use platform validation).
+        let tx = conn.unchecked_transaction().map_err(sql_err)?;
+        tx.execute_batch("ALTER TABLE conversations ADD COLUMN relay_pin BLOB;")
+            .map_err(sql_err)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (2, unixepoch())",
+            [],
+        )
+        .map_err(sql_err)?;
+        tx.commit().map_err(sql_err)?;
+    }
     Ok(())
 }
 

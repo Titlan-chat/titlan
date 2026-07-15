@@ -20,13 +20,17 @@ pub mod client;
 pub mod config;
 pub mod envelope;
 pub mod error;
+pub mod ffi;
 pub mod identity;
 pub mod licensing;
 pub(crate) mod pairing;
+pub(crate) mod relay_client;
 pub mod session;
 pub mod storage;
 
 pub use error::CoreError;
+
+uniffi::setup_scaffolding!();
 
 /// Crate-wide result type.
 pub type Result<T> = std::result::Result<T, CoreError>;

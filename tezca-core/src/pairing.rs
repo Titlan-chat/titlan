@@ -102,6 +102,94 @@ fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
     out.extend_from_slice(bytes);
 }
 
+const PAYLOAD_VERSION: u8 = 1;
+const CONTROL_VERSION: u8 = 1;
+const MAILBOX_ID_LEN: usize = 43;
+
+/// Reply coordinates carried by `pair-ack/1` (scanner → displayer). The
+/// scanner's address is derived from the setup message's identity key, so the
+/// bundled `address_name` field is parsed for format-completeness but the
+/// derived value is authoritative.
+pub(crate) struct ReplyCoords {
+    pub relay_url: String,
+    pub inbox_id: String,
+}
+
+/// Encodes the QR/link pairing payload: version + bundle + relay + inbox
+/// (`proto/pairing.md` §Pairing payload).
+pub(crate) fn encode_pairing_payload(bundle: &[u8], relay_url: &str, inbox_id: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bundle.len() + relay_url.len() + 64);
+    out.push(PAYLOAD_VERSION);
+    put_bytes(&mut out, bundle);
+    put_bytes(&mut out, relay_url.as_bytes());
+    out.extend_from_slice(inbox_id.as_bytes()); // fixed 43 bytes
+    out
+}
+
+/// Parses the pairing payload. Returns (bundle bytes, relay url, inbox id).
+pub(crate) fn parse_pairing_payload(bytes: &[u8]) -> Result<(Vec<u8>, String, String)> {
+    let mut c = Cursor { bytes, pos: 0 };
+    if c.u8()? != PAYLOAD_VERSION {
+        return Err(CoreError::Malformed("unknown pairing payload version"));
+    }
+    let bundle = c.bytes_field()?.to_vec();
+    let relay = utf8(c.bytes_field()?)?;
+    let inbox = utf8(c.take(MAILBOX_ID_LEN)?)?;
+    if c.pos != bytes.len() {
+        return Err(CoreError::Malformed("trailing bytes in pairing payload"));
+    }
+    Ok((bundle, relay, inbox))
+}
+
+/// Encodes a `pair-ack/1` inner-frame payload.
+pub(crate) fn encode_pair_ack(relay_url: &str, inbox_id: &str, address_name: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(CONTROL_VERSION);
+    put_bytes(&mut out, relay_url.as_bytes());
+    out.extend_from_slice(inbox_id.as_bytes());
+    put_bytes(&mut out, address_name.as_bytes());
+    out
+}
+
+/// Parses a `pair-ack/1` payload.
+pub(crate) fn parse_pair_ack(bytes: &[u8]) -> Result<ReplyCoords> {
+    let mut c = Cursor { bytes, pos: 0 };
+    if c.u8()? != CONTROL_VERSION {
+        return Err(CoreError::Malformed("unknown pair-ack version"));
+    }
+    let relay_url = utf8(c.bytes_field()?)?;
+    let inbox_id = utf8(c.take(MAILBOX_ID_LEN)?)?;
+    let _address_name = utf8(c.bytes_field()?)?; // parsed; derived value is authoritative
+    Ok(ReplyCoords {
+        relay_url,
+        inbox_id,
+    })
+}
+
+/// Encodes a `mailbox-update/1` inner-frame payload (relay + new inbox).
+pub(crate) fn encode_mailbox_update(relay_url: &str, inbox_id: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(CONTROL_VERSION);
+    put_bytes(&mut out, relay_url.as_bytes());
+    out.extend_from_slice(inbox_id.as_bytes());
+    out
+}
+
+/// Parses a `mailbox-update/1` payload. Returns (relay url, inbox id).
+pub(crate) fn parse_mailbox_update(bytes: &[u8]) -> Result<(String, String)> {
+    let mut c = Cursor { bytes, pos: 0 };
+    if c.u8()? != CONTROL_VERSION {
+        return Err(CoreError::Malformed("unknown mailbox-update version"));
+    }
+    let relay_url = utf8(c.bytes_field()?)?;
+    let inbox_id = utf8(c.take(MAILBOX_ID_LEN)?)?;
+    Ok((relay_url, inbox_id))
+}
+
+fn utf8(bytes: &[u8]) -> Result<String> {
+    String::from_utf8(bytes.to_vec()).map_err(|_| CoreError::Malformed("field is not UTF-8"))
+}
+
 struct Cursor<'a> {
     bytes: &'a [u8],
     pos: usize,

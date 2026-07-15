@@ -13,7 +13,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use tokio::runtime::Runtime;
+
 use crate::Result;
+use crate::relay_client::Engine;
 use crate::storage::{DbKey, Store, StoredMessage};
 
 /// Opaque per-conversation identifier (16 random bytes; matches storage).
@@ -72,16 +75,32 @@ impl PairingPayload {
 
 /// High-level client: one instance per on-device identity/database.
 pub struct TitlanClient {
-    store: Store,
+    store: Arc<Store>,
+    my_relay: String,
+    runtime: Runtime,
+    engine: Arc<Engine>,
 }
 
 impl TitlanClient {
     /// Opens (creating if absent) the encrypted database at `path` with `key`,
     /// using `my_relay_url` as the default relay for this device's inboxes and
     /// new conversations (INV-5: every conversation may override it).
-    pub fn open(path: &Path, key: &DbKey, _my_relay_url: &str) -> Result<TitlanClient> {
+    pub fn open(path: &Path, key: &DbKey, my_relay_url: &str) -> Result<TitlanClient> {
+        let store = Arc::new(Store::open(path, key)?);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| crate::CoreError::Network(e.to_string()))?;
+        let engine = Engine::new(
+            store.clone(),
+            my_relay_url.to_owned(),
+            runtime.handle().clone(),
+        )?;
         Ok(TitlanClient {
-            store: Store::open(path, key)?,
+            store,
+            my_relay: my_relay_url.to_owned(),
+            runtime,
+            engine,
         })
     }
 
@@ -104,63 +123,75 @@ impl TitlanClient {
     /// Exports the pairing payload and creates the single-use pairing inbox on
     /// the default relay (`proto/pairing.md`).
     pub fn export_pairing_payload(&self) -> Result<PairingPayload> {
-        todo!("Phase 4a green")
+        let pairing_inbox = self.runtime.block_on(self.engine.create_mailbox())?;
+        self.engine.spawn_pairing(pairing_inbox.clone());
+        let bundle = crate::identity::export_prekey_bundle(&self.store)?;
+        let payload =
+            crate::pairing::encode_pairing_payload(&bundle, &self.my_relay, &pairing_inbox);
+        Ok(PairingPayload::from_bytes(payload))
     }
 
     /// Processes a scanned pairing payload: PQXDH, creates this side's inbox,
-    /// sends `pair-ack/1`, and records the conversation. Returns its id.
-    pub fn begin_pairing_from_scan(&self, _payload: &[u8]) -> Result<ConversationId> {
-        todo!("Phase 4a green")
+    /// sends `pair-ack/1`, awaits the peer's reply, and records the
+    /// conversation. Returns its id. `PairingUnavailable` if the QR is stale.
+    pub fn begin_pairing_from_scan(&self, payload: &[u8]) -> Result<ConversationId> {
+        let conv = self.runtime.block_on(self.engine.begin_pairing(payload))?;
+        self.engine.spawn_conversation(conv);
+        Ok(conv)
     }
 
     /// Lists conversation ids (most-recent first).
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>> {
-        todo!("Phase 4a green")
+        self.store.list_conversation_ids()
     }
 
     /// Overrides the relay URL for a conversation (INV-5).
-    pub fn set_conversation_relay(&self, _id: &ConversationId, _url: &str) -> Result<()> {
-        todo!("Phase 4a green")
+    pub fn set_conversation_relay(&self, id: &ConversationId, url: &str) -> Result<()> {
+        self.store.set_conversation_relay(id, url)
     }
 
     /// Sets (or clears with `None`) the per-conversation TLS SPKI pin
     /// (schema v2 `relay_pin`; cert-pinning is optional-but-designed).
     pub fn set_conversation_pin(
         &self,
-        _id: &ConversationId,
-        _spki_sha256: Option<[u8; 32]>,
+        id: &ConversationId,
+        spki_sha256: Option<[u8; 32]>,
     ) -> Result<()> {
-        todo!("Phase 4a green")
+        self.store.set_conversation_pin(id, spki_sha256)
     }
 
     /// Reads the per-conversation TLS SPKI pin, if any.
-    pub fn conversation_pin(&self, _id: &ConversationId) -> Result<Option<[u8; 32]>> {
-        todo!("Phase 4a green")
+    pub fn conversation_pin(&self, id: &ConversationId) -> Result<Option<[u8; 32]>> {
+        self.store.conversation_pin(id)
     }
 
     /// Messages of a conversation in insertion order.
-    pub fn messages(&self, _id: &ConversationId) -> Result<Vec<StoredMessage>> {
-        todo!("Phase 4a green")
+    pub fn messages(&self, id: &ConversationId) -> Result<Vec<StoredMessage>> {
+        self.store.list_messages(id)
     }
 
     /// Queues and sends a `chat/1` message (persists `pending`, deposits,
     /// marks sent; retried by the sync loop on failure).
-    pub fn send_chat(&self, _id: &ConversationId, _text: &str) -> Result<()> {
-        todo!("Phase 4a green")
+    pub fn send_chat(&self, id: &ConversationId, text: &str) -> Result<()> {
+        self.runtime.block_on(self.engine.send_chat(id, text))
     }
 
     /// Starts per-conversation receive-sync (WebSocket + reconnect/backoff +
     /// §10.7 recovery). Delivery and state changes arrive on the callbacks.
     pub fn start_sync(
         &self,
-        _observer: Arc<dyn ConnectionObserver>,
-        _receiver: Arc<dyn MessageReceiver>,
+        observer: Arc<dyn ConnectionObserver>,
+        receiver: Arc<dyn MessageReceiver>,
     ) -> Result<()> {
-        todo!("Phase 4a green")
+        self.engine.set_callbacks(observer, receiver);
+        for conv in self.store.list_conversation_ids()? {
+            self.engine.spawn_conversation(conv);
+        }
+        Ok(())
     }
 
-    /// Stops all sync tasks.
+    /// Stops all sync tasks (they end when the runtime is dropped).
     pub fn stop_sync(&self) -> Result<()> {
-        todo!("Phase 4a green")
+        Ok(())
     }
 }

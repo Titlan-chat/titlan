@@ -169,3 +169,30 @@ pub fn decrypt_message(
 
     InnerFrame::parse(&plaintext, profile)
 }
+
+/// Peeks the envelope kind without decrypting.
+pub fn envelope_kind(wire: &[u8]) -> Result<EnvelopeKind> {
+    Ok(Envelope::parse(wire)?.kind)
+}
+
+/// Decrypts a session-setup message whose sender is not yet known — a message
+/// arriving on a pairing inbox (blind relay + sealed sender leave no sender
+/// hint). The sender's address is derived from the identity key embedded in
+/// the `PreKeySignalMessage`; the session is established and stored under it.
+/// Returns `(sender_address, frame)`.
+pub fn decrypt_setup_from_unknown(
+    store: &Store,
+    wire: &[u8],
+    profile: &PaddingProfile,
+) -> Result<(String, InnerFrame)> {
+    let envelope = Envelope::parse(wire)?;
+    if envelope.kind != EnvelopeKind::SessionSetup {
+        return Err(CoreError::Malformed(
+            "expected a session-setup message on a pairing inbox",
+        ));
+    }
+    let msg = PreKeySignalMessage::try_from(envelope.ciphertext.as_slice()).map_err(signal_err)?;
+    let sender = crate::identity::address_for_identity(msg.identity_key());
+    let frame = decrypt_message(store, &sender, wire, profile)?;
+    Ok((sender, frame))
+}

@@ -41,6 +41,21 @@ correlate identical identity keys across conversations during session setup.
 Accepted for MVP; sealed-sender-style outer wrapping is a post-MVP hardening
 option.
 
+Address derivation (Phase 4a): a party's pairing address (`address_name`) is
+the hex of its serialized identity public key, derived deterministically so a
+recipient can compute a sender's address from the identity key embedded in an
+incoming `PreKeySignalMessage` — needed to decrypt a `pair-ack/1` that arrives
+on a pairing inbox whose sender is otherwise unknown (blind relay, sealed
+sender). The address is a **client-side** value only: it lives in the
+SQLCipher-encrypted session store and, on the wire, appears solely inside
+end-to-end-encrypted payloads (e.g. `pair-ack/1`) and in the out-of-band QR —
+never as a distinct relay-visible field (deposits carry only the encrypted
+envelope, and mailbox IDs are relay-generated random). It therefore adds **no
+wire linkability beyond the pre-existing `PreKeySignalMessage` identity-key
+exposure** described above: because the address is a function of the identity
+key, anyone able to correlate by address must already hold the key (via the QR
+or a parsed setup blob) and could correlate by it directly.
+
 ## Pairing payload (QR / link, Phase 4a)
 
 The payload displayed as a QR code (or shared as a link) wraps the bundle

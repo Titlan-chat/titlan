@@ -5,6 +5,20 @@
 # crypto) enforcement point. CI fails on advisories, unknown sources, wildcard
 # versions, licenses outside the allowlist, and — critically — any attempt to
 # depend on a cryptographic-primitive crate from outside libsignal's tree.
+#
+# LICENSE LEDGER (non-permissive / notable licenses, and why each is accepted):
+#   - AGPL-3.0-only : our own tezca-relay, and the libsignal tree (A2). Combined
+#     -work implications flagged as work order §10.6 (pre-suite decision).
+#   - MPL-2.0 (hpke-rs, hpke-rs-crypto) : inside libsignal's signal-crypto.
+#   - MPL-2.0 (uniffi + its 5 sub-crates) : the FFI toolkit (A3). MPL-2.0 is
+#     FILE-scoped copyleft; uniffi is consumed UNMODIFIED (no edits to its
+#     source), so tezca-core's Apache-2.0 license is unaffected (MPL-2.0 §3.3 /
+#     Larger-Work). Scoped below; never allowed globally.
+#   - OpenSSL : openssl-src vendored by SQLCipher (locked A4).
+#   - CDLA-Permissive-2.0 (webpki-root-certs) : permissive data license for the
+#     Mozilla CA bundle used by the TLS client stack; allowed globally.
+# TLS: rustls runs on ONE provider — ring (INV-6). aws-lc-rs is banned in
+# [bans] so CI fails if any dep pulls the other provider (flag 2a).
 
 [graph]
 all-features = true
@@ -34,6 +48,8 @@ allow = [
     "Unicode-3.0",
     # OpenSSL license: openssl-src vendored by SQLCipher (locked A4).
     "OpenSSL",
+    # CDLA-Permissive-2.0: webpki-root-certs (Mozilla CA bundle); permissive.
+    "CDLA-Permissive-2.0",
 ]
 exceptions = [
     { name = "tezca-relay", allow = ["AGPL-3.0-only"] },
@@ -47,6 +63,14 @@ exceptions = [
     # accepted as a dependency — scoped here, never allowed globally.
     { name = "hpke-rs", allow = ["MPL-2.0"] },
     { name = "hpke-rs-crypto", allow = ["MPL-2.0"] },
+    # uniffi FFI toolkit (A3), MPL-2.0, consumed unmodified — see the license
+    # ledger above; tezca-core stays Apache-2.0.
+    { name = "uniffi", allow = ["MPL-2.0"] },
+    { name = "uniffi_core", allow = ["MPL-2.0"] },
+    { name = "uniffi_macros", allow = ["MPL-2.0"] },
+    { name = "uniffi_meta", allow = ["MPL-2.0"] },
+    { name = "uniffi_pipeline", allow = ["MPL-2.0"] },
+    { name = "uniffi_internal_macros", allow = ["MPL-2.0"] },
 ]
 
 [[licenses.clarify]]

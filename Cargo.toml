@@ -42,12 +42,25 @@ proptest = "1"
 # tree via default-features = false everywhere.
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws"] }
 axum-server = { version = "0.8.0", default-features = false, features = ["tls-rustls-no-provider"] }
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "io-util"] }
 bytes = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustix = { version = "1", default-features = false, features = ["std", "process", "mm"] }
 tungstenite = "0.28"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+# Phase 4a relay client (maintainer-approved F2/2a). All TLS runs on the ring
+# provider; aws-lc-rs is kept out of the tree (default-features=false + the
+# deny.toml aws-lc-rs ban). reqwest uses rustls-no-provider (we install ring);
+# tokio-tungstenite carries no built-in TLS (we hand it a tokio-rustls/ring
+# stream for wss://). uniffi is MPL-2.0, consumed unmodified — see deny.toml.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls-platform-verifier = "0.7"
+# ring: INV-6-approved (named alongside libsignal/rustls). Used only for the
+# SHA-256 of a cert SPKI in the optional per-conversation TLS pin verifier.
+ring = "0.17"
+uniffi = "0.32"
 
 # Mirror of libsignal's own [patch.crates-io] (patches do not propagate from
 # dependencies): their audited curve25519-dalek fork. Same tag as v0.97.2.

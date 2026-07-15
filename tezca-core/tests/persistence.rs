@@ -104,10 +104,11 @@ fn migrations_apply_once_and_are_idempotent() {
     let key = DbKey::generate();
     {
         let store = Store::open(&path, &key).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 1);
+        // Latest schema version (v1 Phase 2 + v2 Phase 4a relay_pin).
+        assert_eq!(store.schema_version().unwrap(), 2);
     }
     let store = Store::open(&path, &key).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 1);
+    assert_eq!(store.schema_version().unwrap(), 2);
 }
 
 #[test]

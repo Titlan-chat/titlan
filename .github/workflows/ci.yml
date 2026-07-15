@@ -43,6 +43,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo build --workspace --locked
       - run: cargo test --workspace --locked
+      # The flat-memory acceptance test (§6 Phase 3) is RSS-sensitive and is
+      # #[ignore]d in the concurrent run above; run it alone, single-threaded.
+      - run: cargo test -p tezca-relay --test relay_lifecycle --locked memory_stays_flat_under_sustained_load -- --ignored --exact --test-threads=1
 
   rust-supply-chain:
     name: Rust — cargo deny + audit (INV-6/INV-7)

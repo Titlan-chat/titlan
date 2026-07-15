@@ -60,7 +60,13 @@ pub fn initialize(store: &Store) -> Result<()> {
             break candidate;
         }
     };
-    let address_name = hex::encode(crate::storage::random_id());
+    // Address = hex of the serialized identity public key. Deriving it from
+    // the identity key (rather than a random id) lets a recipient of a
+    // session-setup message compute the sender's address from the message's
+    // embedded identity key — needed to decrypt a `pair-ack/1` arriving on a
+    // pairing inbox whose sender is otherwise unknown (blind relay, sealed
+    // sender). It is still an unlinkable pseudonym (a public key, no PII).
+    let address_name = address_for_identity(identity.identity_key());
 
     // Signed EC prekey: keypair + signature over its public key, both from
     // libsignal primitives.
@@ -121,6 +127,13 @@ pub fn initialize(store: &Store) -> Result<()> {
     )
     .map_err(sql_err)?;
     tx.commit().map_err(sql_err)
+}
+
+/// Derives the pairing address (pseudonym) for an identity public key: the
+/// hex of its serialized form. Deterministic, so a recipient can compute a
+/// sender's address from a received session-setup message's identity key.
+pub(crate) fn address_for_identity(identity_key: &libsignal_protocol::IdentityKey) -> String {
+    hex::encode(identity_key.serialize())
 }
 
 /// `true` once [`initialize`] has completed for this store.
