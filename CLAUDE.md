@@ -19,6 +19,18 @@ autonomously.
   remains in history.
 - Every commit carries the `Co-Authored-By` trailer identifying AI
   authorship. History is never rewritten to obscure it.
+- Valid red (adopted 2026-07-16): a test that fails at setup/plumbing
+  rather than at its intended assertion is NOT a valid red for that test.
+  If the CI red run shows any test erroring before reaching its predicted
+  assertion, the red commit is amended before any green work proceeds.
+- Revision mechanics (adopted 2026-07-16): revisions are made by
+  amend/rebase on a named branch, never by reset-and-recommit from the
+  base — reset cycles orphan hashes and make reports cite superseded
+  commits.
+- Stop-for-push reports (adopted 2026-07-16): every stop-for-push report
+  is written to a file outside the repo and embeds fresh `git branch -v`
+  and `git log --oneline --all -8` output generated at write time, never
+  recalled.
 
 ## Design gate
 
@@ -35,6 +47,23 @@ autonomously.
   modifies remote state — even where credentials permit it. Every push is
   performed manually by the maintainer as the human release gate. When work
   is ready, stop and say so.
+- Exception (adopted 2026-07-16): merge/close/comment on dependency-update
+  PRs only, and only under an explicit per-instance maintainer instruction
+  naming the PR(s). Never feature branches, never main pushes, never
+  releases. All other remote state remains maintainer-only.
+- Agent-executed merges must set the squash commit message explicitly
+  (subject and body, including the `Co-Authored-By` trailer) — GitHub's
+  squash default takes the PR body and drops trailers.
+- **Instruction-conflict rule:** if a direct instruction conflicts with
+  CLAUDE.md or the work order, flag the conflict and wait for confirmation
+  before acting — even when the instruction comes from the maintainer.
+- Deviation record (2026-07-16): the Dependabot triage of this date
+  (merging #12/#17, closing #14/#16/#18, rationale comments) was executed
+  on maintainer instruction BEFORE this exception existed, and the conflict
+  with the then-absolute boundary was not flagged. The #17 squash merge
+  (`ed4d382`) also carries no `Co-Authored-By` trailer identifying the
+  agent-executed merge (GitHub squash default; not rewritten — history is
+  never rewritten). This note is the durable record of both.
 
 ## Dependency rules
 

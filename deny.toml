@@ -81,7 +81,62 @@ expression = "MIT AND ISC AND OpenSSL"
 license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [bans]
-multiple-versions = "warn"
+# Tightened from "warn" 2026-07-16 (maintainer-directed after PR #17):
+# duplicate versions now FAIL CI unless recorded as deliberate below, so
+# every future duplication is an explicit decision, not silent drift.
+multiple-versions = "deny"
+# Each skip names one stale version, its provenance (cargo tree -i), and why
+# it cannot converge yet. Revisit on the parent crate's next bump.
+# All skips are VERSION-PINNED (maintainer condition, 2026-07-16): no
+# skip-tree, so any FUTURE duplicate — even under an already-skipped parent —
+# fails CI and gets its own deliberate entry here.
+skip = [
+    # §10.2 LOCKSTEP — DO NOT DEDUP INDEPENDENTLY: libsignal's RustCrypto
+    # trait chain (crypto-common/aead) is still on rand_core 0.6. This dupe
+    # exists BECAUSE of the coupled-dependency rule; converging it means
+    # bumping libsignal's side, which moves only with a libsignal bump
+    # verified against the RNG trait bounds (§10.2 ledger).
+    { name = "rand_core", version = "=0.6.4" },
+    # §10.2 LOCKSTEP — DO NOT DEDUP INDEPENDENTLY: rand_core 0.6.4's
+    # OS-entropy backend, pinned by the same libsignal chain as above.
+    { name = "getrandom", version = "=0.2.17" },
+    # tungstenite 0.30's internal masking/handshake RNG chain (rand 0.10 →
+    # rand_core 0.10 → getrandom 0.4), pinned entry per link. Shares NO
+    # types with libsignal's API; the libsignal-coupled workspace rand
+    # stays 0.9 (§10.2).
+    { name = "rand", version = "=0.10.2" },
+    { name = "rand_core", version = "=0.10.1" },
+    { name = "getrandom", version = "=0.4.3" },
+    # axum 0.8 bundles its own tokio-tungstenite/tungstenite 0.29 pair for
+    # the relay's server-side WS; the workspace client stack is on 0.30.
+    # Converges when axum bumps its WS dependency.
+    { name = "tokio-tungstenite", version = "=0.29.0" },
+    { name = "tungstenite", version = "=0.29.0" },
+    # petgraph 0.8 → prost-build (libsignal build-deps): hashbrown 0.15 and
+    # its foldhash 0.1 trail the workspace 0.17/0.2 tree.
+    { name = "hashbrown", version = "=0.15.5" },
+    { name = "foldhash", version = "=0.1.5" },
+    # rusqlite 0.40's wasm VFS chain (sqlite-wasm-rs, non-Android target)
+    # trails the workspace hashbrown 0.17.
+    { name = "hashbrown", version = "=0.16.1" },
+    # prost-build (libsignal build-deps) trails libsignal's own 0.15 direct.
+    { name = "itertools", version = "=0.14.0" },
+    # tungstenite 0.30 moved to sha1 0.11; axum's WS stack and libsignal's
+    # signal-crypto remain on 0.10 (both remain INV-6 wrapper-listed above).
+    # sha1 0.11 drags the RustCrypto 0.11-generation base traits alongside
+    # libsignal's 0.10 generation — one pinned entry per link (previously
+    # absorbed silently by the skip-tree this ledger replaced):
+    { name = "sha1", version = "=0.11.0" },
+    { name = "digest", version = "=0.11.3" },
+    { name = "block-buffer", version = "=0.12.1" },
+    { name = "crypto-common", version = "=0.2.2" },
+    # rand 0.10's chacha core (chacha20 0.10) pulls cpufeatures 0.3;
+    # libsignal's stack is on 0.2.
+    { name = "cpufeatures", version = "=0.3.0" },
+    # Non-Linux transitive splits (Windows / UEFI targets in the lockfile).
+    { name = "windows-sys", version = "=0.52.0" },
+    { name = "r-efi", version = "=5.3.0" },
+]
 wildcards = "deny"
 # Our own unpublished workspace crates are consumed by path (no version);
 # registry wildcards remain denied. Maintainer-approved 2026-07-14.
