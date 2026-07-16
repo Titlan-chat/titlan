@@ -32,6 +32,14 @@ updates:
       # both entries; 0.9.x patches still flow.
       - dependency-name: "rand"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # libsignal bumps are maintainer-initiated, never automated: they move
+      # in lockstep with rand (see above / work-order §10.2), must be
+      # verified against the RNG trait bounds in identity/session key
+      # generation, and require re-mirroring libsignal's [patch.crates-io]
+      # table in our Cargo.toml — none of which a Dependabot PR performs.
+      # Security advisories still surface via the cargo deny/audit CI job
+      # (INV-6/INV-7). Maintainer decision 2026-07-16 (PR #16 closure).
+      - dependency-name: "libsignal-protocol"
 
   - package-ecosystem: gradle
     directory: /titlan-android
