@@ -9,9 +9,9 @@ agp = "8.13.2"
 kotlin = "2.4.10"
 composeBom = "2026.06.01"
 activityCompose = "1.13.0"
-coreKtx = "1.17.0"
+coreKtx = "1.19.0"
 junit = "4.13.2"
-cyclonedxPlugin = "3.2.4"
+cyclonedxPlugin = "3.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
