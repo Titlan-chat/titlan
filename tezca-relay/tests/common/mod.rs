@@ -111,7 +111,7 @@ pub fn free_port() -> u16 {
 }
 
 /// Spawns the relay on `port` with `extra` config flags, in `cwd`, and waits
-/// until it accepts TCP connections. Panics (test failure) if it never does —
+/// until it answers `GET /healthz`. Panics (test failure) if it never does —
 /// which is exactly the red state before the Phase 3 implementation exists.
 pub fn spawn_relay_at(port: u16, extra: &[&str], cwd: &std::path::Path) -> RelayProc {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_tezca-relay"));
@@ -129,14 +129,17 @@ pub fn spawn_relay_at(port: u16, extra: &[&str], cwd: &std::path::Path) -> Relay
         port,
     };
 
+    // Readiness gate: a bare TCP-connect success does NOT prove the relay is
+    // listening — the port comes from free_port()'s ephemeral bind, and the
+    // kernel can hand the just-freed port to a CONCURRENT test's transient
+    // free_port() listener, whose backlog accepts the handshake (and even
+    // buffers a request) before RST-ing everything when it drops. Only an
+    // answered GET /healthz proves the relay itself owns the port; poll it
+    // with bounded backoff until it answers 200.
     let deadline = Instant::now() + STARTUP_TIMEOUT;
+    let mut backoff = Duration::from_millis(10);
     loop {
-        if TcpStream::connect_timeout(
-            &format!("127.0.0.1:{port}").parse().expect("addr"),
-            Duration::from_millis(100),
-        )
-        .is_ok()
-        {
+        if relay_healthy(port) {
             return proc;
         }
         if let Ok(Some(status)) = proc.child_mut().try_wait() {
@@ -144,10 +147,37 @@ pub fn spawn_relay_at(port: u16, extra: &[&str], cwd: &std::path::Path) -> Relay
         }
         if Instant::now() > deadline {
             proc.kill();
-            panic!("relay did not start listening on {port} within {STARTUP_TIMEOUT:?}");
+            panic!("relay did not answer /healthz on {port} within {STARTUP_TIMEOUT:?}");
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(backoff);
+        backoff = (backoff * 2).min(Duration::from_millis(100));
     }
+}
+
+/// One non-panicking readiness probe: true iff GET /healthz answers 200.
+/// Every failure mode of a not-yet-ready (or wrong) endpoint — connect
+/// refused/reset, write failure, read timeout on a mute socket, RST from a
+/// dropped transient listener, non-200 — is `false`, and the caller retries.
+fn relay_healthy(port: u16) -> bool {
+    let addr = format!("127.0.0.1:{port}");
+    let Ok(mut stream) =
+        TcpStream::connect_timeout(&addr.parse().expect("addr"), Duration::from_millis(100))
+    else {
+        return false;
+    };
+    let probe_io = Some(Duration::from_millis(500));
+    if stream.set_read_timeout(probe_io).is_err() || stream.set_write_timeout(probe_io).is_err() {
+        return false;
+    }
+    let req = format!("GET /healthz HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut raw = Vec::new();
+    if stream.read_to_end(&mut raw).is_err() {
+        return false;
+    }
+    raw.starts_with(b"HTTP/1.1 200")
 }
 
 pub fn spawn_relay(extra: &[&str]) -> (RelayProc, tempfile::TempDir) {
@@ -190,18 +220,31 @@ impl HttpResponse {
 }
 
 pub fn http_request(base: &str, method: &str, path: &str, body: &[u8]) -> HttpResponse {
-    let mut stream = TcpStream::connect(base).expect("connect relay");
+    let mut stream = TcpStream::connect(base)
+        .unwrap_or_else(|e| panic!("connect relay [{method} {path} @ {base}]: {e:?}"));
     stream.set_read_timeout(Some(IO_TIMEOUT)).expect("timeout");
     stream.set_write_timeout(Some(IO_TIMEOUT)).expect("timeout");
     let req = format!(
         "{method} {path} HTTP/1.1\r\nHost: {base}\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    stream.write_all(req.as_bytes()).expect("write request");
-    stream.write_all(body).expect("write body");
+    stream
+        .write_all(req.as_bytes())
+        .unwrap_or_else(|e| panic!("write request [{method} {path} @ {base}]: {e:?}"));
+    stream
+        .write_all(body)
+        .unwrap_or_else(|e| panic!("write body [{method} {path} @ {base}]: {e:?}"));
 
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).expect("read response");
+    stream.read_to_end(&mut raw).unwrap_or_else(|e| {
+        panic!(
+            "read response [{method} {path} @ {base}, local={:?}, {} bytes body sent, {} bytes response already read: {:?}]: {e:?}",
+            stream.local_addr(),
+            body.len(),
+            raw.len(),
+            String::from_utf8_lossy(&raw[..raw.len().min(64)]),
+        )
+    });
     parse_response(&raw)
 }
 
