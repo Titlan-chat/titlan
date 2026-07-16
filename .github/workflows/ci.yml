@@ -53,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
-      - uses: taiki-e/cache-cargo-install-action@v2
+      - uses: taiki-e/cache-cargo-install-action@v3
         with:
           tool: cargo-audit
       - run: cargo audit
@@ -70,7 +70,7 @@ jobs:
           workspaces: |
             tezca-core/fuzz
             tezca-relay/fuzz
-      - uses: taiki-e/cache-cargo-install-action@v2
+      - uses: taiki-e/cache-cargo-install-action@v3
         with:
           tool: cargo-fuzz
       - name: Fuzz outer envelope parser
@@ -117,7 +117,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
       - run: rustup toolchain install && rustup component add llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/cache-cargo-install-action@v2
+      - uses: taiki-e/cache-cargo-install-action@v3
         with:
           tool: cargo-llvm-cov
       # Instrument exactly the tests the §8 gate measures: tezca-core's own
@@ -176,7 +176,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/cache-cargo-install-action@v2
+      - uses: taiki-e/cache-cargo-install-action@v3
         with:
           tool: cargo-cyclonedx
       - run: cargo cyclonedx --format json
