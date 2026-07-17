@@ -10,10 +10,21 @@
 
 use std::sync::Arc;
 
+use zeroize::Zeroize;
+
 use crate::client::{
     ConnectionObserver, ConnectionState, ConversationId, MessageReceiver, TitlanClient,
 };
 use crate::storage::{DbKey, StoredMessage};
+
+/// Generates a fresh 32-byte DB key from the OS CSPRNG in Rust (maintainer
+/// decision 5a: the key is born in tezca-core, wrapped by the caller —
+/// Android Keystore on-device). The returned bytes cross the FFI once at
+/// birth; the Kotlin side wraps and zeroizes its copy.
+#[uniffi::export]
+pub fn generate_db_key() -> Vec<u8> {
+    DbKey::generate().as_bytes().to_vec()
+}
 
 /// FFI error surfaced to Kotlin (flattened from [`crate::CoreError`]).
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -126,23 +137,23 @@ fn conv_id(bytes: &[u8]) -> std::result::Result<ConversationId, TitlanError> {
 #[uniffi::export]
 impl FfiClient {
     /// Opens the encrypted store at `db_path` with a 32-byte `db_key`.
+    /// The FFI-side transient copies of the key are zeroized before
+    /// returning (INV-1 hygiene; [`DbKey`] itself zeroizes on drop).
     #[uniffi::constructor]
     pub fn open(
         db_path: String,
         db_key: Vec<u8>,
         my_relay_url: String,
     ) -> std::result::Result<Arc<Self>, TitlanError> {
-        let key: [u8; 32] = db_key
-            .as_slice()
-            .try_into()
-            .map_err(|_| TitlanError::Other {
-                msg: "db key must be 32 bytes".into(),
-            })?;
-        let inner = TitlanClient::open(
-            std::path::Path::new(&db_path),
-            &DbKey::from_bytes(key),
-            &my_relay_url,
-        )?;
+        let mut db_key = db_key;
+        // The [u8; 32] is moved straight into DbKey (zeroize-on-drop), so
+        // the only residual FFI copy is the Vec, zeroized on every path.
+        let key = <[u8; 32]>::try_from(db_key.as_slice()).map(DbKey::from_bytes);
+        db_key.zeroize();
+        let key = key.map_err(|_| TitlanError::Other {
+            msg: "db key must be 32 bytes".into(),
+        })?;
+        let inner = TitlanClient::open(std::path::Path::new(&db_path), &key, &my_relay_url)?;
         Ok(Arc::new(FfiClient { inner }))
     }
 

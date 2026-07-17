@@ -71,6 +71,12 @@ exceptions = [
     { name = "uniffi_meta", allow = ["MPL-2.0"] },
     { name = "uniffi_pipeline", allow = ["MPL-2.0"] },
     { name = "uniffi_internal_macros", allow = ["MPL-2.0"] },
+    # uniffi's bindings-generator crates, pulled by the workspace
+    # `uniffi-bindgen` BUILD TOOL only (4b-1 green: bindings generated at
+    # build time, never committed, never shipped in the APK). Same Mozilla
+    # project, same MPL-2.0 file-scoped terms, consumed unmodified.
+    { name = "uniffi_bindgen", allow = ["MPL-2.0"] },
+    { name = "uniffi_udl", allow = ["MPL-2.0"] },
 ]
 
 [[licenses.clarify]]

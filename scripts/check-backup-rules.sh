@@ -33,31 +33,42 @@ if ! grep -q 'allowBackup.*=false' <<<"$manifest"; then
   say_fail "merged manifest must set android:allowBackup=\"false\""
 fi
 
-rules_ref="$(grep -o 'dataExtractionRules[^@]*@xml/[A-Za-z0-9_]*' <<<"$manifest" | head -1)"
-if [[ -z "$rules_ref" ]]; then
+# In the BINARY manifest the attribute is a numeric resource reference
+# (e.g. `dataExtractionRules(0x0101063e)=@0x7f0c0000`); resolve the id to
+# its file path via the APK's resource table.
+ref_id="$(grep -o 'dataExtractionRules([^)]*)=@0x[0-9a-f]*' <<<"$manifest" | grep -o '0x[0-9a-f]*$' | head -1)"
+if [[ -z "$ref_id" ]]; then
   say_fail "merged manifest carries no android:dataExtractionRules reference"
 else
-  rules_file="res/xml/${rules_ref##*@xml/}.xml"
+  rules_file="$("$AAPT2" dump resources "$APK" | grep -A2 "resource $ref_id " \
+    | grep -o 'res/[^ ]*\.xml' | head -1)"
+  if [[ -z "$rules_file" ]]; then
+    say_fail "resource $ref_id not resolvable to a file in the APK resource table"
+    rules_file="__unresolved__"
+  fi
   rules="$("$AAPT2" dump xmltree --file "$rules_file" "$APK" 2>/dev/null)"
   if [[ -z "$rules" ]]; then
     say_fail "dataExtractionRules resource $rules_file not found in APK"
   else
+    # PER-SECTION verification (maintainer-directed, green checklist item 1):
+    # each of <cloud-backup> and <device-transfer> must carry its OWN
+    # <exclude> — a global count would accept two excludes in one section.
     for section in cloud-backup device-transfer; do
       if ! grep -q "E: $section" <<<"$rules"; then
         say_fail "dataExtractionRules missing <$section> section"
+        continue
+      fi
+      section_excludes=$(awk -v sec="$section" '
+        /E: (cloud-backup|device-transfer)/ { insec = ($0 ~ "E: " sec) }
+        insec && /E: exclude/ { n++ }
+        END { print n + 0 }
+      ' <<<"$rules")
+      if [[ "$section_excludes" -lt 1 ]]; then
+        say_fail "<$section> carries no <exclude> of its own"
       fi
     done
     if grep -q 'E: include' <<<"$rules"; then
       say_fail "dataExtractionRules must not contain <include> elements"
-    fi
-    # Each section must exclude the app data root at minimum.
-    sections=0
-    while IFS= read -r block; do
-      sections=$((sections + 1))
-    done < <(grep -E 'E: (cloud-backup|device-transfer)' <<<"$rules")
-    excludes_root=$(grep -c 'E: exclude' <<<"$rules" || true)
-    if [[ "$sections" -ge 2 && "$excludes_root" -lt 2 ]]; then
-      say_fail "each of cloud-backup and device-transfer needs an <exclude> for app data"
     fi
   fi
 fi

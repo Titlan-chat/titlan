@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "3"
-members = ["tezca-core", "tezca-relay"]
+members = ["tezca-core", "tezca-relay", "uniffi-bindgen"]
 # The fuzz crates are their own workspaces (cargo-fuzz convention,
 # nightly-only).
 exclude = ["tezca-core/fuzz", "tezca-relay/fuzz"]

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
+<!--
+  Maintainer-confirmed backup posture (4b design gate, 2026-07-16): app data
+  is excluded from BOTH cloud backup AND device-to-device transfer. The
+  SQLCipher DB key is wrapped by a non-transferable Android Keystore key, so
+  any extracted copy of app data is undecryptable — a pure leak surface.
+  Belt-and-braces with android:allowBackup="false" (legacy path).
+  scripts/check-backup-rules.sh asserts these rules against the BUILT APK.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>
