@@ -12,6 +12,7 @@ import app.titlan.crypto.DbKeyManager
 import java.io.File
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -25,6 +26,19 @@ class LogcatHygieneTest {
 
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
+
+    @Before
+    fun freshState() {
+        // Reset DB and key state COHERENTLY (run 29613625849: deleting only
+        // the key blob left a stale SQLCipher DB encrypted under the old
+        // key — cross-test pollution, "database key rejected" at open).
+        for (name in listOf(
+            "titlan.db", "titlan.db-journal", "titlan.db-wal", "titlan.db-shm",
+            DbKeyManager.WRAP_FILE, "${DbKeyManager.WRAP_FILE}.tmp",
+        )) {
+            File(context.filesDir, name).delete()
+        }
+    }
 
     @Test
     fun dbKeyNeverAppearsInLogcat() {

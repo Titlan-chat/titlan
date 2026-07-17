@@ -35,7 +35,15 @@ class DbKeyManagerTest {
 
     @Before
     fun freshState() {
-        File(context.filesDir, DbKeyManager.WRAP_FILE).delete()
+        // Reset key AND DB state coherently (run 29613625849: key-only
+        // resets leave a stale SQLCipher DB under the old key for any
+        // later test that opens it).
+        for (name in listOf(
+            "titlan.db", "titlan.db-journal", "titlan.db-wal", "titlan.db-shm",
+            DbKeyManager.WRAP_FILE, "${DbKeyManager.WRAP_FILE}.tmp",
+        )) {
+            File(context.filesDir, name).delete()
+        }
         KeyStore.getInstance("AndroidKeyStore").apply {
             load(null)
             deleteEntry(DbKeyManager.KEYSTORE_ALIAS)
