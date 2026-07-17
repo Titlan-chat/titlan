@@ -236,7 +236,11 @@ jobs:
         if: always()
         with:
           name: repro-report
-          path: repro-report.txt
+          # repro-mismatch/ exists only when the double build diverged; it
+          # holds both APKs for per-entry inspection (see repro-build.sh).
+          path: |
+            repro-report.txt
+            repro-mismatch/
           retention-days: 30
 
   sbom:
