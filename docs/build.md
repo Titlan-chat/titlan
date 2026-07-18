@@ -95,6 +95,20 @@ Notes on determinism:
   fresh state; when comparing hashes manually, run
   `./gradlew clean :app:assembleRelease`.
 
+### SOURCE_DATE_EPOCH and the OpenSSL banner
+
+SQLCipher's vendored OpenSSL (`openssl-sys` under `libsqlite3-sys`) embeds an
+`OPENSSL_BUILT_ON` banner — a "built on: <UTC>" string — into
+`libtezca_core.so` at compile time, which made two otherwise-identical APK
+builds differ (CI runs 29612174509/29620310696). Every path that
+cross-compiles the Rust core therefore pins `SOURCE_DATE_EPOCH` to HEAD's
+commit timestamp (`git log -1 --format=%ct`): `scripts/repro-build.sh`
+exports it (its build trees carry no `.git`), and the Gradle `cargoNdkBuild`
+task computes it at configuration, honoring an externally supplied value
+first and falling back to `0` where git is unavailable. With the pin,
+OpenSSL renders the pinned commit time in the banner and the `.so` is
+bit-identical across builds of the same commit.
+
 ## SBOMs (CycloneDX)
 
 ```sh

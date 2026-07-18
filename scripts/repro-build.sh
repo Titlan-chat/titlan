@@ -15,6 +15,13 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# SOURCE_DATE_EPOCH pinned to HEAD's commit time: SQLCipher's vendored
+# OpenSSL (openssl-sys under libsqlite3-sys) bakes an OPENSSL_BUILT_ON
+# banner into libtezca_core.so; without this pin the two passes differ by
+# wall clock (runs 29612174509/29620310696). Both passes build the same
+# commit, so both get the same value. Computed here because the build tree
+# copies exclude .git.
+export SOURCE_DATE_EPOCH="$(git -C "$REPO" log -1 --format=%ct)"
 BUILD_ROOT="${REPRO_BUILD_ROOT:-/tmp/tezca-repro}"
 REPORT="${REPRO_REPORT:-$REPO/repro-report.txt}"
 CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"

@@ -18,6 +18,23 @@ val titlanApplicationId: String = providers.gradleProperty("TITLAN_APPLICATION_I
 // local builds compile the Rust core with the identical toolchain.
 val pinnedNdkVersion = "28.2.13676358"
 val repoRoot: File = rootDir.parentFile
+
+// SOURCE_DATE_EPOCH for the Rust cross-build: SQLCipher's vendored OpenSSL
+// bakes an OPENSSL_BUILT_ON banner into libtezca_core.so; pinning this to
+// the commit time makes the .so reproducible. An externally provided
+// SOURCE_DATE_EPOCH (e.g. scripts/repro-build.sh, whose build tree has no
+// .git) takes precedence; falls back to "0" when git is unavailable so
+// configuration never breaks.
+val sourceDateEpoch: String = System.getenv("SOURCE_DATE_EPOCH")
+    ?: try {
+        val proc = ProcessBuilder("git", "-C", repoRoot.absolutePath, "log", "-1", "--format=%ct")
+            .redirectErrorStream(true)
+            .start()
+        val out = proc.inputStream.bufferedReader().readText().trim()
+        if (proc.waitFor() == 0 && out.isNotEmpty()) out else "0"
+    } catch (_: Exception) {
+        "0"
+    }
 val rustJniLibsDir = layout.buildDirectory.dir("rustJniLibs")
 val uniffiKotlinDir = layout.buildDirectory.dir("generated/uniffi/kotlin")
 
@@ -87,6 +104,7 @@ val cargoNdkBuild by tasks.registering(Exec::class) {
     // library mode needs for metadata extraction. Build these .so unstripped
     // — AGP strips packaged jniLibs itself, so the APK is unaffected.
     environment("CARGO_PROFILE_RELEASE_STRIP", "none")
+    environment("SOURCE_DATE_EPOCH", sourceDateEpoch)
     commandLine(
         "cargo", "ndk",
         "-t", "arm64-v8a",
