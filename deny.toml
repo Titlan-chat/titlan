@@ -30,6 +30,36 @@ ignore = [
     # hax formal-verification macros inside libsignal's tree. Nothing to fix
     # on our side; revisit on every libsignal bump.
     { id = "RUSTSEC-2026-0173", reason = "transitive via libsignal → libcrux → hax-lib-macros; build-time proc-macro only" },
+    # libcrux-sha3 0.0.8: incorrect output of the incremental portable SHAKE
+    # XOF API on multiple squeeze calls. Impact is scoped to the Xof-trait
+    # incremental squeeze API when called more than once; no caller in
+    # libsignal's tree invokes the affected API — call-site grep of the two
+    # direct dependents, hpke-rs v0.6.1 (one-shot shake256::<32>/<64> only)
+    # and libcrux-ml-kem v0.0.8 (block-oriented shake128_squeeze_* only,
+    # whole 168-byte blocks; Xof trait never used), verified 2026-07-18.
+    # No fix in libsignal v0.97.3/v0.97.4/main, lockfiles verified
+    # 2026-07-18 (fix needs libcrux-sha3 >=0.0.10; no libsignal release
+    # carries it).
+    # RE-EVALUATE BY 2026-08-18 and at every libsignal release.
+    { id = "RUSTSEC-2026-0207", reason = "affected incremental Xof squeeze API not invoked by any caller in libsignal's tree — call-site grep of hpke-rs v0.6.1 and libcrux-ml-kem v0.0.8, verified 2026-07-18; no upstream fix yet — re-evaluate by 2026-08-18 and at every libsignal release" },
+    # libcrux-sha3 0.0.8: potential panic in AVX2 x4 SHAKE-256 on output
+    # buffer lengths >32 not divisible by 8. Impact is scoped to that
+    # API/length combination; no caller in libsignal's tree reaches it —
+    # call-site grep of the two direct dependents, hpke-rs v0.6.1 (no avx2
+    # use) and libcrux-ml-kem v0.0.8 (x4::shake256 only with ETA*64 = 128-
+    # or 192-byte outputs, always divisible by 8), verified 2026-07-18.
+    # No fix in libsignal v0.97.3/v0.97.4/main, lockfiles verified
+    # 2026-07-18 (fix needs libcrux-sha3 >=0.0.10; no libsignal release
+    # carries it).
+    # RE-EVALUATE BY 2026-08-18 and at every libsignal release.
+    { id = "RUSTSEC-2026-0208", reason = "affected AVX2 x4 shake256 odd-length case not reached by any caller in libsignal's tree — call-site grep of hpke-rs v0.6.1 and libcrux-ml-kem v0.0.8, verified 2026-07-18; no upstream fix yet — re-evaluate by 2026-08-18 and at every libsignal release" },
+    # libcrux-secrets 0.0.5: potentially incorrect output of constant-time
+    # swap/select on aarch64 — correctness issue in the ML-KEM tree. Accepted
+    # risk window: no known exploit, upstream ships the same versions. No fix
+    # in libsignal v0.97.3/v0.97.4/main, lockfiles verified 2026-07-18 (fix
+    # needs libcrux-secrets >=0.0.6; no libsignal release carries it).
+    # RE-EVALUATE BY 2026-08-18 and at every libsignal release.
+    { id = "RUSTSEC-2026-0212", reason = "aarch64 constant-time swap/select correctness in ML-KEM tree; accepted risk window, no known exploit, upstream ships same versions; no upstream fix yet — re-evaluate by 2026-08-18 and at every libsignal release" },
 ]
 
 [licenses]
@@ -71,6 +101,12 @@ exceptions = [
     { name = "uniffi_meta", allow = ["MPL-2.0"] },
     { name = "uniffi_pipeline", allow = ["MPL-2.0"] },
     { name = "uniffi_internal_macros", allow = ["MPL-2.0"] },
+    # uniffi's bindings-generator crates, pulled by the workspace
+    # `uniffi-bindgen` BUILD TOOL only (4b-1 green: bindings generated at
+    # build time, never committed, never shipped in the APK). Same Mozilla
+    # project, same MPL-2.0 file-scoped terms, consumed unmodified.
+    { name = "uniffi_bindgen", allow = ["MPL-2.0"] },
+    { name = "uniffi_udl", allow = ["MPL-2.0"] },
 ]
 
 [[licenses.clarify]]

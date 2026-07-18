@@ -11,6 +11,11 @@ rust-version.workspace = true
 # Guard against accidental crates.io publication while the MVP is in flight.
 publish = false
 
+# cdylib: the Android app loads tezca-core as libtezca_core.so via the
+# UniFFI bindings (A3); rlib stays for the Rust workspace consumers.
+[lib]
+crate-type = ["lib", "cdylib"]
+
 [dependencies]
 # INV-6: libsignal is the only crypto source; rusqlite/SQLCipher is locked by
 # A4; rand supplies the OS CSPRNG that libsignal's API contract requires the

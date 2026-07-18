@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
+#
+# cargo-audit configuration. cargo-audit scans Cargo.lock against its own
+# config — it does not read deny.toml — so advisory-ignore decisions must be
+# mirrored here for CI's `cargo audit` step (see run 29633828754).
+
+[advisories]
+ignore = [
+    # Mirrors deny.toml [advisories] ignores — deny.toml carries the full
+    # per-advisory rationale blocks and is the single source of truth.
+    # Approved 2026-07-18. RE-EVALUATE BY 2026-08-18 and at every libsignal
+    # release; remove here and in deny.toml together via the §10.2 lockstep
+    # libsignal bump.
+    "RUSTSEC-2026-0207",
+    "RUSTSEC-2026-0208",
+    "RUSTSEC-2026-0212",
+]

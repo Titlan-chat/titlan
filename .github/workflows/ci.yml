@@ -146,7 +146,74 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v6
+      # 4b-1 green: the app build cross-compiles tezca-core (cargo-ndk) and
+      # generates the UniFFI bindings, so the Android jobs need the Rust
+      # toolchain, the Android targets, and the pinned NDK.
+      - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
+        working-directory: .
+      - run: rustup toolchain install && rustup target add aarch64-linux-android x86_64-linux-android
+        working-directory: .
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-ndk
+      - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+        working-directory: .
       - run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+
+  android-instrumented:
+    name: Android — instrumented (Keystore wrap, INV-1 at-rest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v6
+      # Native toolchain for the tezca-core cross-compile (see android job).
+      - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
+      - run: rustup toolchain install && rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-ndk
+      - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          disable-animations: true
+          working-directory: titlan-android
+          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest
+      # Backup posture check runs even when the instrumented suite is red
+      # (if: always()) so both red signals stay visible on the same run.
+      - name: Backup rules — aapt2 vs built APK (cloud + d2d excluded)
+        if: always()
+        run: |
+          cd titlan-android && ./gradlew --no-daemon :app:assembleDebug
+          cd .. && ./scripts/check-backup-rules.sh
+      # Evidence channel for every red/green run: the instrumented reports
+      # are how predicted failure signatures get checked against reality.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: androidTest-reports
+          # HTML report plus the JUnit XML — both candidate XML locations
+          # covered (AGP has moved this directory between versions; an empty
+          # glob is harmless, a missing one costs the machine-readable
+          # evidence).
+          path: |
+            titlan-android/app/build/reports/androidTests/**
+            titlan-android/app/build/outputs/androidTest-results/connected/**
+            titlan-android/app/build/test-results/connected/**
+          retention-days: 30
 
   reproducible-build:
     name: Reproducible build — double build + diff
@@ -154,7 +221,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y $PROTOC_APT
-      - run: rustup toolchain install
+      - run: rustup toolchain install && rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-ndk
+      - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -165,7 +236,11 @@ jobs:
         if: always()
         with:
           name: repro-report
-          path: repro-report.txt
+          # repro-mismatch/ exists only when the double build diverged; it
+          # holds both APKs for per-entry inspection (see repro-build.sh).
+          path: |
+            repro-report.txt
+            repro-mismatch/
           retention-days: 30
 
   sbom:
