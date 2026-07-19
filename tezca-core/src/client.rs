@@ -72,8 +72,25 @@ pub trait MessageReceiver: Send + Sync {
 
 /// Sink for per-conversation connection-state changes (Kotlin implements it).
 pub trait ConnectionObserver: Send + Sync {
-    /// Called on every connection-state transition.
+    /// Called on every per-relay-endpoint connection-state transition. In the
+    /// MVP a conversation routes over one relay endpoint at a time, so this is
+    /// effectively per-conversation; the vocabulary is per-endpoint (INV-5) for
+    /// the multi-relay future, where the UI aggregates across endpoints.
     fn on_state(&self, conversation_id: ConversationId, state: ConnectionState);
+
+    /// §10.7 recovery is exhausted (offset ≥ W, or the 3-cycle/24 h bound):
+    /// routing cannot be re-established in-band; re-pair is the last resort.
+    /// This is the "unrecoverable, act" signal, distinct from the transient
+    /// [`ConnectionState::Recovering`]. Default no-op (frozen §1).
+    fn on_conversation_needs_repair(&self, _conversation_id: ConversationId) {}
+
+    /// A queued send has permanently failed (the relay rejected the blob as
+    /// malformed/oversized — never retryable), not a transient outage. Default
+    /// no-op (frozen §1).
+    fn on_permanent_send_failure(&self, _conversation_id: ConversationId, _message_id: [u8; 16]) {}
+
+    /// The encrypted store could not be read or written. Default no-op (§1).
+    fn on_storage_error(&self, _detail: &str) {}
 }
 
 /// The bytes shown as a pairing QR (or shared as a link fragment). Format is
@@ -97,7 +114,6 @@ impl PairingPayload {
 /// High-level client: one instance per on-device identity/database.
 pub struct TitlanClient {
     store: Arc<Store>,
-    my_relay: String,
     engine: Arc<Engine>,
 }
 
@@ -112,11 +128,7 @@ impl TitlanClient {
             my_relay_url.to_owned(),
             shared_runtime().handle().clone(),
         )?;
-        Ok(TitlanClient {
-            store,
-            my_relay: my_relay_url.to_owned(),
-            engine,
-        })
+        Ok(TitlanClient { store, engine })
     }
 
     /// Generates the local identity + initial prekeys (A1). Errors if already
@@ -135,22 +147,21 @@ impl TitlanClient {
         self.store.schema_version()
     }
 
-    /// Exports the pairing payload and creates the single-use pairing inbox on
-    /// the default relay (`proto/pairing.md`).
-    pub fn export_pairing_payload(&self) -> Result<PairingPayload> {
-        let pairing_inbox = shared_runtime().block_on(self.engine.create_mailbox())?;
-        self.engine.spawn_pairing(pairing_inbox.clone());
+    /// Exports a v2 pairing OFFER (`proto/pairing.md` §Offer): bundle + relay +
+    /// single-use pairing inbox + a 256-bit pairing secret. Spawns the v2
+    /// listener that verifies proof-of-scan on the responder's `pair-ack/2` and
+    /// hands off this side's long-lived inbox + recovery contribution.
+    pub fn export_pairing_offer(&self) -> Result<PairingPayload> {
         let bundle = crate::identity::export_prekey_bundle(&self.store)?;
-        let payload =
-            crate::pairing::encode_pairing_payload(&bundle, &self.my_relay, &pairing_inbox);
+        let payload = shared_runtime().block_on(self.engine.export_offer(&bundle))?;
         Ok(PairingPayload::from_bytes(payload))
     }
 
-    /// Processes a scanned pairing payload: PQXDH, creates this side's inbox,
-    /// sends `pair-ack/1`, awaits the peer's reply, and records the
-    /// conversation. Returns its id. `PairingUnavailable` if the QR is stale.
-    pub fn begin_pairing_from_scan(&self, payload: &[u8]) -> Result<ConversationId> {
-        let conv = shared_runtime().block_on(self.engine.begin_pairing(payload))?;
+    /// Processes a scanned v2 offer: PQXDH, sends `pair-ack/2` with proof-of-scan,
+    /// awaits the `inbox-handoff`, and establishes the shared recovery root.
+    /// Returns the conversation id. `PairingUnavailable` if the offer is stale.
+    pub fn begin_pairing_from_offer(&self, payload: &[u8]) -> Result<ConversationId> {
+        let conv = shared_runtime().block_on(self.engine.begin_pairing_from_offer(payload))?;
         self.engine.spawn_conversation(conv);
         Ok(conv)
     }

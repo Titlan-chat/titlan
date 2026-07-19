@@ -236,18 +236,23 @@ bundle:
    per-conversation inbox.
 2. B's **first sealed frame** to A's pairing inbox is a `pair-ack/2` control
    frame (`proto/inner-frame.md`) carrying B's own reply bundle, B's routing
-   coordinates (relay + inbox), and a **fixed 32-byte** MAC:
+   coordinates (relay + inbox), B's 32-byte `recovery_root_contribution`
+   (B2 — never in the offer), and a **fixed 32-byte** MAC (F2):
 
    ```
-   proof = HMAC-SHA256(pairing_secret, responder_bundle)   # libsignal, INV-6
+   proof = HMAC-SHA256(pairing_secret, responder_bundle ‖ recovery_root_contribution)  # libsignal, INV-6
    ```
 
    `pair-ack/2` **folds B's inbox announcement into this first frame**, so the
-   return direction (B→A) needs no separate `inbox-handoff` at pairing.
-3. A decrypts, then verifies `proof` over the received `responder_bundle`
-   keyed by the `pairing_secret` A minted. **Constant-time** compare. Any
-   mismatch ⇒ `ProofOfScanFailed`: A **invalidates the offer** (it moves to
-   the failed UI state with one-tap re-mint) and does not record the return.
+   return direction (B→A) needs no separate `inbox-handoff` at pairing. A's own
+   contribution is delivered to B in the `inbox-handoff` (`mailbox-update/2`);
+   the per-conversation recovery root is `HMAC-SHA256(A_contribution,
+   B_contribution)` (`proto/inner-frame.md` §Derived recovery-mailbox IDs).
+3. A decrypts, then verifies `proof` over the received `responder_bundle ‖
+   recovery_root_contribution` (F2) keyed by the `pairing_secret` A minted.
+   **Constant-time** compare. Any mismatch ⇒ `ProofOfScanFailed`: A
+   **invalidates the offer** (it moves to the failed UI state with one-tap
+   re-mint) and does not record the return.
 
 **Why invalidate on failure (not merely discard):** a failed proof is not
 noise — it is evidence that a party who did *not* hold the complete offer

@@ -106,6 +106,12 @@ pub trait FfiMessageReceiver: Send + Sync {
 #[uniffi::export(callback_interface)]
 pub trait FfiConnectionObserver: Send + Sync {
     fn on_state(&self, conversation_id: Vec<u8>, state: FfiConnectionState);
+    /// §10.7 recovery exhausted → re-pair is the last resort (frozen §1).
+    fn on_conversation_needs_repair(&self, conversation_id: Vec<u8>);
+    /// A queued send permanently failed (relay rejected the blob).
+    fn on_permanent_send_failure(&self, conversation_id: Vec<u8>, message_id: Vec<u8>);
+    /// The encrypted store could not be read/written.
+    fn on_storage_error(&self, detail: String);
 }
 
 struct ReceiverAdapter(Box<dyn FfiMessageReceiver>);
@@ -119,6 +125,17 @@ struct ObserverAdapter(Box<dyn FfiConnectionObserver>);
 impl ConnectionObserver for ObserverAdapter {
     fn on_state(&self, conversation_id: ConversationId, state: ConnectionState) {
         self.0.on_state(conversation_id.to_vec(), state.into());
+    }
+    fn on_conversation_needs_repair(&self, conversation_id: ConversationId) {
+        self.0
+            .on_conversation_needs_repair(conversation_id.to_vec());
+    }
+    fn on_permanent_send_failure(&self, conversation_id: ConversationId, message_id: [u8; 16]) {
+        self.0
+            .on_permanent_send_failure(conversation_id.to_vec(), message_id.to_vec());
+    }
+    fn on_storage_error(&self, detail: &str) {
+        self.0.on_storage_error(detail.to_owned());
     }
 }
 
@@ -165,15 +182,17 @@ impl FfiClient {
         Ok(self.inner.is_initialized()?)
     }
 
-    pub fn export_pairing_payload(&self) -> std::result::Result<Vec<u8>, TitlanError> {
-        Ok(self.inner.export_pairing_payload()?.as_bytes().to_vec())
+    /// v2 asymmetric offer export (proof-of-scan + derived-recovery pairing).
+    pub fn export_pairing_offer(&self) -> std::result::Result<Vec<u8>, TitlanError> {
+        Ok(self.inner.export_pairing_offer()?.as_bytes().to_vec())
     }
 
-    pub fn begin_pairing_from_scan(
+    /// Consumes a scanned v2 offer; returns the new conversation id.
+    pub fn begin_pairing_from_offer(
         &self,
         payload: Vec<u8>,
     ) -> std::result::Result<Vec<u8>, TitlanError> {
-        Ok(self.inner.begin_pairing_from_scan(&payload)?.to_vec())
+        Ok(self.inner.begin_pairing_from_offer(&payload)?.to_vec())
     }
 
     pub fn list_conversations(&self) -> std::result::Result<Vec<Vec<u8>>, TitlanError> {

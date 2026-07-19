@@ -4,7 +4,9 @@
 # Titlan Inner Frame — Message / Control Discrimination
 
 **Status: NORMATIVE for Phase 4b-2** (frozen design 2026-07-18, §3/§8;
-registry ratified 2026-07-19). This document specifies how a receiver tells a
+registry ratified 2026-07-19; maintainer-ratified B1/B2 + F1/F2 2026-07-19 —
+dual-contribution recovery root, HMAC-PRF mailbox derivation, proof over
+`bundle ‖ contribution`, inbox-handoff `/2` pairing vs `/3` rotation). This document specifies how a receiver tells a
 **human message** from a **protocol-internal control frame** inside the sealed
 payload, and defines the control frames 4b-2 uses: the pairing response
 `pair-ack/2`, the rotation announcement `inbox-handoff`, and the recovery
@@ -53,15 +55,19 @@ cleanly (`RecognizedButUnsupported`) rather than mis-parsing.
 | responder_bundle | B's pairing bundle (self-delimiting, `proto/pairing.md` §Pairing bundle) — identity key + signed / Kyber / one-time prekeys |
 | relay_url | u16 len + UTF-8 (B's relay for this conversation) |
 | inbox_id | 43 bytes ASCII (B's per-conversation inbox) |
-| proof | 32 bytes = `HMAC-SHA256(pairing_secret, responder_bundle)` via libsignal (INV-6) |
+| recovery_root_contribution | 32 bytes CSPRNG — B's contribution to the §8 recovery root (B2; never in the offer) |
+| proof | 32 bytes = `HMAC-SHA256(pairing_secret, responder_bundle ‖ recovery_root_contribution)` via libsignal (INV-6) |
 
-A verifies `proof` over the received `responder_bundle`, keyed by the
-`pairing_secret` A minted, in **constant time**. Mismatch ⇒
-`CoreError::ProofOfScanFailed` and A **invalidates** the offer
+A verifies `proof` over the received `responder_bundle ‖
+recovery_root_contribution` (F2 — the contribution IS in the MAC input, so an
+off-path party cannot substitute a recovery-root contribution without failing
+proof-of-scan), keyed by the `pairing_secret` A minted, in **constant time**.
+Mismatch ⇒ `CoreError::ProofOfScanFailed` and A **invalidates** the offer
 (`proto/pairing.md` §Proof-of-scan). On success A records B's
-`relay_url`/`inbox_id` as the conversation's routing target and retires the
-pairing mailbox; A's own long-lived inbox is handed to B by a subsequent
-`inbox-handoff`.
+`relay_url`/`inbox_id` as the conversation's routing target, keeps B's
+`recovery_root_contribution`, and retires the pairing mailbox; A's own
+long-lived inbox and A's own contribution are handed to B by a subsequent
+`inbox-handoff` (`mailbox-update/2`).
 
 ## Control frame: `inbox-handoff` (mailbox rotation)
 
@@ -74,24 +80,110 @@ to retire the derived mailboxes. The pairing RETURN direction (B→A) does NOT
 use it — `pair-ack/2` folds B's inbox announcement into the proof-of-scan
 frame.
 
-Encoding is **identical to `mailbox-update/1`** (`proto/pairing.md`
-§Control messages) — relay + new inbox — carried as **`mailbox-update`
-type_version `0x02`** on payload_type `0x06`. Reusing the existing registry
-byte with a bumped type-version keeps the outer registry unchanged; a v1
-receiver rejects `0x02` cleanly (`RecognizedButUnsupported`) rather than
-mis-parsing.
+It rides payload_type `0x06` (`mailbox-update`) with **two distinct
+type_versions (F1)** that differ structurally, so the frame's role is explicit
+and the parser rejects a length mismatch cleanly (`Malformed`) rather than
+guessing:
 
-| field | encoding |
-|---|---|
-| version | u8 = `0x02` |
-| relay_url | u16 len + UTF-8 |
-| inbox_id | 43 bytes ASCII (the new relay-generated inbox) |
+- **`mailbox-update/2` — pairing handoff.** Carries A's recovery-root
+  contribution (the offerer's half of the B2 dual-contribution root).
 
-The difference from `mailbox-update/1` is **semantic, not structural**: v1 was
-one-sided recovery of a single lost direction; v2 is the rotation handoff that
-retires a bridge mailbox (pairing or derived) in favor of a durable home. The
-receiver adopts the announced inbox as the peer's routing target for the
-conversation.
+  | field | encoding |
+  |---|---|
+  | version | u8 = `0x02` |
+  | relay_url | u16 len + UTF-8 |
+  | inbox_id | 43 bytes ASCII (the new relay-generated inbox) |
+  | recovery_root_contribution | 32 bytes CSPRNG — A's contribution |
+
+- **`mailbox-update/3` — recovery-time rotation.** The recovery root already
+  exists on both ends, so the contribution field is **structurally absent** (no
+  all-zero sentinel — the frame is simply shorter, and a `/3` frame carrying
+  trailing bytes is `Malformed`).
+
+  | field | encoding |
+  |---|---|
+  | version | u8 = `0x03` |
+  | relay_url | u16 len + UTF-8 |
+  | inbox_id | 43 bytes ASCII (the new relay-generated inbox) |
+
+A v1 (`mailbox-update/1`) receiver rejects `0x02`/`0x03` cleanly
+(`RecognizedButUnsupported`). The receiver adopts the announced inbox as the
+peer's routing target; on `/2` it also derives and stores the recovery root
+(below).
+
+### Rotation ordering (maintainer-ratified convergence + rotation ordering, 2026-07-19)
+
+The rotation that finishes §10.7 recovery is **asymmetric and role-ordered** so
+the two parties never rotate simultaneously into inboxes the other has already
+left, and so no in-flight chat is dropped during the switch:
+
+- The **OFFERER initiates** rotation; the responder NEVER does. The pairing role
+  is persisted at pairing, so this is a deterministic tiebreak.
+- `mailbox-update/3` is deposited into the peer's derived inbox **at the
+  generation the peer REPORTED** (in its `recovery-hello`), never at `max(g)` —
+  a generation outside the peer's receive window is unread. The offerer
+  therefore initiates only once it holds a hello whose reported generation
+  equals its own (converged).
+- **Normative flow (drain-then-switch).**
+  1. The offerer mints a fresh relay-generated inbox `F_A`, deposits `/3{F_A}`
+     into the RESPONDER'S derived inbox, and **STAYS subscribed on its own
+     derived inbox** — draining any in-flight chat the responder is still
+     sending there.
+  2. The responder receives `/3{F_A}`, routes its sends to `F_A`, mints `F_B`,
+     and deposits `/3{F_B}` **into the OFFERER'S derived inbox** (NOT `F_A` —
+     the offerer is not subscribed on `F_A` yet), then switches its receive to
+     `F_B` and deletes its own derived inbox (or the relay idle TTL reaps it).
+  3. The offerer receives `/3{F_B}` on its derived inbox, routes its sends to
+     `F_B`, switches its receive to `F_A`, and deletes its derived inbox —
+     **receipt of the second leg is the implicit ack**.
+- **Why this is safe.** Per-mailbox delivery is FIFO, so the offerer drains
+  every chat message the responder deposited into the offerer's derived inbox
+  BEFORE the `/3{F_B}` that triggers the switch — no message is stranded. A
+  late deposit into an already-deleted derived inbox simply yields `404` →
+  loss detection → a bounded fresh recovery cycle (the derived IDs remain
+  re-derivable), and messages keep flowing over the derived inboxes meanwhile.
+
+## Derived recovery-mailbox IDs (B1/B2, maintainer-ratified 2026-07-19)
+
+Both mailboxes of a conversation share a relay, so a relay restart is TOTAL
+routing loss; the derived mailboxes let both parties re-establish routing
+without re-pairing.
+
+- **Root (B2 dual-contribution).** Each party contributes 32 CSPRNG bytes at
+  pairing — the responder's `recovery_root_contribution` in `pair-ack/2`, the
+  offerer's in `mailbox-update/2`. Neither is ever in the offer/QR. The root is
+
+  ```
+  root = HMAC-SHA256(A_contribution, B_contribution)          # A = offerer, B = responder
+  ```
+
+  Both parties compute the identical root; the offerer's contribution keys the
+  HMAC and the responder's is the message.
+- **Mailbox ID (B1 HMAC-PRF).**
+
+  ```
+  mailbox_id = base64url_nopad(
+      HMAC-SHA256(root, "titlan-recovery-mailbox-v1" ‖ role_label ‖ generation_u32_be)
+  )                                                            # 43 chars
+  role_label ∈ { "offerer", "responder" }  = the mailbox OWNER's pairing role
+  ```
+
+  256-bit, unguessable, opaque to the relay; role- and generation-separated so
+  the two directions and successive generations never collide.
+- **Why HMAC-PRF, not literal HKDF.** libsignal exposes no public HKDF; it does
+  expose HMAC-SHA256 (`signal-crypto` `CryptographicMac`). For a uniformly
+  random `root`, HKDF-Expand ≡ HMAC-PRF, so a single HMAC is an equivalent KDF
+  and keeps every byte inside libsignal (INV-6).
+- **Why not a `pairing_secret`-derived root (2a, REJECTED).** The
+  `pairing_secret` travels in the offer/QR; deriving the root from it would let
+  a QR photographer compute the entire future recovery-mailbox sequence and
+  PUT-squat those IDs — a permanent recovery-denial DoS. The dual-contribution
+  root is never in the offer, so a photographer learns nothing about it.
+- **Edge — total loss before the handoff lands.** If the relay dies after
+  `pair-ack/2` but before `mailbox-update/2` is delivered, the two parties do
+  not share a root yet (one side has only its own contribution). Recovery is
+  impossible; the conversation falls back to the re-pair path
+  (`conversation-needs-repair`). Accepted (frozen §8).
 
 ## Control frame: `recovery-hello`
 
@@ -107,12 +199,28 @@ the sender's current generation so both sides converge on `max(g_A, g_B)`.
 | nonce | 16 bytes — random; makes redeliveries idempotent-detectable so a redelivered hello is not reprocessed |
 
 Rules:
-- `recovery-hello` is deposited into peer generations `[peer_g … peer_g+(W−1)]`
-  after the sender PUT-CREATES those derived inboxes (the create-before-deposit
-  order is load-bearing for the 2W bound; frozen design §8).
+- **Convergence mechanism (maintainer-ratified 2026-07-19).** The receiver MUST
+  subscribe its OWN derived inbox at its current generation `own_g` and MAY also
+  subscribe lower generations; the normative convergence mechanism is the
+  SENDER's forward probe, which deposits the `recovery-hello` across peer
+  generations `[peer_g … peer_g+(W−1)]` after PUT-CREATING those inboxes
+  (create-before-deposit is load-bearing). Because the sender's window covers
+  the receiver's `own_g` whenever the relative offset is `≤ W−1`, a
+  current-generation-only receiver converges over EXACTLY the recoverable range
+  — coinciding with the `≥ W` exhaustion bound below. A receiver-side window
+  `[own_g−(W−1) … own_g]` would extend reach to a `2W−2` offset, but only into
+  offsets already defined as exhausted (`≥ W`), so it adds no recoverable reach;
+  the receiver-side window is therefore OPTIONAL.
 - First **verified** `recovery-hello` receipt in either direction → both sides
-  adopt `max(own_g, generation)` and immediately run the rotation
-  (`inbox-handoff`), retiring the derived mailboxes.
+  adopt `max(own_g, generation)`; once converged (a hello whose reported
+  generation equals `own_g`) the OFFERER runs the role-ordered rotation
+  (§inbox-handoff Rotation ordering), retiring the derived mailboxes.
+- **Hello answers hello (maintainer-ratified 2026-07-19).** On a verified
+  `recovery-hello`, a party that has NOT already sent one at its current
+  generation replies with a hello into the sender's derived inbox **at the
+  generation the received hello reported**; `(generation, nonce)` dedup
+  terminates the exchange after one round. Rationale: bilateral convergence —
+  without the reply only one side learns the other is present.
 - A relative generation offset `≥ W` (W = 4, config) → the frame cannot land
   in a live window → `conversation-needs-repair` (`CoreError::ConversationNeedsRepair`).
 - Relay `429`s while depositing are **pacing signals**, never failures: they

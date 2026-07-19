@@ -22,6 +22,11 @@ crate-type = ["lib", "cdylib"]
 # caller to pass in. No other crypto-adjacent dependency without explicit
 # human approval — deny.toml bans primitive crates outside libsignal's tree.
 libsignal-protocol = { workspace = true }
+# 4b-2 green (maintainer-ratified B1/F-dep-1, F-dep-2): libsignal's crypto
+# crate for HMAC-SHA256 (proof-of-scan + §8 derived-mailbox PRF), and subtle
+# for constant-time proof compare. Both INV-6-clean (see workspace ledger).
+signal-crypto = { workspace = true }
+subtle = { workspace = true }
 rusqlite = { workspace = true }
 rand = { workspace = true }
 zeroize = { workspace = true }
