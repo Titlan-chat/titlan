@@ -97,9 +97,41 @@ if [ -d tezca-relay/src ]; then
   fi
 fi
 
+# --- 5. Release carries no debug test anchors (4b-2, frozen design §9) --------
+# The CI relay-trust path (a network-security-config permitting cleartext /
+# trusting a test CA) is DEBUG-ONLY: it must live under src/debug and must not
+# be referenced by the main manifest or any release source. A release APK that
+# trusted a test anchor would be a live MITM surface.
+android_app=titlan-android/app
+# 5a. The network-security-config resource exists ONLY under src/debug.
+nsc_stray=$(list_files \
+  | grep -E "^${android_app}/src/.*/res/xml/network_security_config\.xml$" \
+  | grep -vE "^${android_app}/src/debug/" || true)
+if [ -n "$nsc_stray" ]; then
+  echo "test anchor outside src/debug (network_security_config.xml must be debug-only):"
+  echo "$nsc_stray"
+  fail=1
+fi
+# 5b. The main manifest never wires networkSecurityConfig (only the debug
+#     overlay may), and cleartext permission never appears outside src/debug.
+if [ -f "${android_app}/src/main/AndroidManifest.xml" ] \
+   && grep -q 'networkSecurityConfig' "${android_app}/src/main/AndroidManifest.xml"; then
+  echo "main manifest references networkSecurityConfig — must be a debug-only overlay"
+  fail=1
+fi
+cleartext_stray=$(list_files \
+  | grep -E "^${android_app}/src/" \
+  | grep -vE "^${android_app}/src/debug/" \
+  | xargs -r grep -l -F 'cleartextTrafficPermitted="true"' 2>/dev/null || true)
+if [ -n "$cleartext_stray" ]; then
+  echo "cleartext traffic permitted outside src/debug (test anchor leaked into release):"
+  echo "$cleartext_stray"
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs)."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors)."

@@ -81,6 +81,18 @@ pub enum CoreError {
     /// condition (`proto/pairing.md`): a captured QR cannot re-pair.
     #[error("pairing inbox unavailable (consumed or expired)")]
     PairingUnavailable,
+    /// The responder's first sealed message failed proof-of-scan: the MAC over
+    /// its bundle, keyed by the offer's pairing secret, did not verify. The
+    /// return is rejected — possession-of-offer is the trust root
+    /// (`proto/pairing.md` §3, 4b-2). Raised only after decryption succeeds.
+    #[error("proof-of-scan verification failed")]
+    ProofOfScanFailed,
+    /// §10.7 recovery has exhausted its generation window (relative offset ≥ W)
+    /// or run out of probe cycles: routing to the peer cannot be re-established
+    /// in-band. Surfaced to the UI as the `conversation-needs-repair` event;
+    /// re-pair is the last resort (frozen design §8, 4b-2).
+    #[error("conversation needs repair (recovery exhausted)")]
+    ConversationNeedsRepair,
     /// Underlying libsignal protocol failure.
     #[error("protocol error: {0}")]
     Signal(String),

@@ -186,6 +186,66 @@ pub(crate) fn parse_mailbox_update(bytes: &[u8]) -> Result<(String, String)> {
     Ok((relay_url, inbox_id))
 }
 
+// --- 4b-2: asymmetric offer + proof-of-scan (frozen design §3) --------------
+// PRODUCTION HOME, stubbed in the 4b-2 RED commit. The offer extends the v1
+// payload above with a random 256-bit pairing secret carried OUTSIDE the key
+// bundle; the responder's first sealed message carries a MAC over its own
+// bundle keyed by that secret, and the offerer rejects any return that does
+// not verify (`CoreError::ProofOfScanFailed`). Possession-of-offer is the
+// explicit trust root. All MAC/KDF primitives come from libsignal (INV-6);
+// the green commit fills the bodies. Normative: `proto/pairing.md`.
+
+/// Length of the random pairing secret carried in an offer (256-bit).
+pub(crate) const PAIRING_SECRET_LEN: usize = 32;
+
+/// Offer payload version (distinct from the v1 `pair-ack` flow; unknown ⇒
+/// reject). Bumped so a v1 scanner and a v2 offerer never silently half-pair.
+#[allow(dead_code)]
+pub(crate) const OFFER_VERSION: u8 = 2;
+
+/// Encodes an asymmetric pairing offer: `OFFER_VERSION` + bundle + relay +
+/// pairing mailbox id + 32-byte pairing secret. QR and `titlan://pair#…` link
+/// carry these BYTE-IDENTICAL bytes (one spec, two encodings).
+#[allow(dead_code)]
+pub(crate) fn encode_pairing_offer(
+    _bundle: &[u8],
+    _relay_url: &str,
+    _pairing_inbox_id: &str,
+    _pairing_secret: &[u8; PAIRING_SECRET_LEN],
+) -> Vec<u8> {
+    todo!("4b-2 green: frame OFFER_VERSION|bundle|relay|inbox|secret per proto/pairing.md")
+}
+
+/// Parses an asymmetric offer. Returns the bundle, relay, pairing inbox id, and
+/// pairing secret. Rejects unknown version, truncation, and trailing bytes.
+#[allow(dead_code)]
+pub(crate) fn parse_pairing_offer(
+    _bytes: &[u8],
+) -> Result<(Vec<u8>, String, String, [u8; PAIRING_SECRET_LEN])> {
+    todo!("4b-2 green: strict parse of the offer payload")
+}
+
+/// Computes the proof-of-scan MAC over the responder's `bundle`, keyed by the
+/// offer's `pairing_secret` (libsignal HMAC, INV-6).
+#[allow(dead_code)]
+pub(crate) fn compute_proof_of_scan(
+    _pairing_secret: &[u8; PAIRING_SECRET_LEN],
+    _responder_bundle: &[u8],
+) -> [u8; 32] {
+    todo!("4b-2 green: HMAC(pairing_secret, responder_bundle) via libsignal")
+}
+
+/// Verifies a proof-of-scan MAC in constant time. `ProofOfScanFailed` on any
+/// mismatch; the offerer discards the return and the offer stands.
+#[allow(dead_code)]
+pub(crate) fn verify_proof_of_scan(
+    _pairing_secret: &[u8; PAIRING_SECRET_LEN],
+    _responder_bundle: &[u8],
+    _mac: &[u8],
+) -> Result<()> {
+    todo!("4b-2 green: constant-time compare; Err(ProofOfScanFailed) on mismatch")
+}
+
 fn utf8(bytes: &[u8]) -> Result<String> {
     String::from_utf8(bytes.to_vec()).map_err(|_| CoreError::Malformed("field is not UTF-8"))
 }

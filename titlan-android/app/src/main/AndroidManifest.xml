@@ -3,9 +3,14 @@
 <!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No INTERNET permission yet: networking arrives with the relay client
-         (Phase 4) and must honor INV-5 (relay address from conversation config,
-         never hardcoded). -->
+    <!-- Networking arrives with 4b-2 sync. INV-5 still holds: the relay address
+         comes from per-conversation config in the core, never hardcoded here. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Always-on receive-sync foreground service (frozen design §1, §7). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Runtime-granted; the persistent FGS notification is the only post. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".TitlanApp"
@@ -24,6 +29,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Receive-sync FGS. foregroundServiceType is the frozen design §6
+             red-phase verification (remoteMessaging vs specialUse, decided by
+             the a–d checks on API 35/36); specialUse is the conservative
+             default declared until that verification ratifies remoteMessaging.
+             The PROPERTY justification is required for specialUse. -->
+        <service
+            android:name=".sync.SyncService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="always-on E2EE message sync over WebSocket; no FCM/push rails; GrapheneOS-first distribution" />
+        </service>
     </application>
 
 </manifest>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
+<!--
+  DEBUG-ONLY test anchor. It lives under src/debug and is merged only into
+  debug builds; release APKs never see it (asserted by
+  scripts/check-invariants.sh). Frozen design §9 (CI relay TLS): the green
+  target is a debug-only config trusting the rcgen test CA served by the CI
+  relay. The 4b-2 RED commit reaches the plain-http test relay over cleartext
+  at 10.0.2.2 (the emulator's host loopback), so only that one host is
+  cleartext-permitted; everything else stays TLS-only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
