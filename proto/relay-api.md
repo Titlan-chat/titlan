@@ -63,6 +63,28 @@ ID. Deleting a mailbox therefore destroys only the deleting party's own
 undelivered messages and closes their own channel — it exposes nothing about
 a third party (IDs are unguessable). Useful for clean conversation deletion.
 
+### `PUT /v1/mailboxes/{id}`
+Idempotent create-at-client-specified-id (Phase 4b-2, frozen §8) — for §10.7
+derived-recovery mailboxes, whose ids both conversation peers compute
+independently (`proto/inner-frame.md` §Derived recovery-mailbox IDs). Empty
+request body. `{id}` is a caller-chosen **256-bit** value (43-char base64url).
+- `201 Created` (empty body): the mailbox exists after the call —
+  **byte-identical whether it was created or already existed** (no existence
+  oracle; the client already holds the id, so nothing is returned).
+- `400 Bad Request`: `{id}` is not a 43-char base64url value (shape-only; no
+  server state consulted, so it leaks no existence information).
+- `429 Too Many Requests` (+ `Retry-After`): per-source create-at-id rate.
+- `503 Service Unavailable`: global mailbox capacity reached — returned
+  **uniformly regardless of whether `{id}` already exists** (no oracle at cap;
+  recovery-blocked-at-cap is accepted, frozen §8).
+
+There is **no per-mailbox rate limit** on PUT (the id is caller-chosen and may
+not exist yet). PUT counts against the global mailbox cap identically to POST.
+Idempotent create-at-id is safe here because ids are unguessable 256-bit values
+derived from a per-conversation secret both peers share; a third party cannot
+guess an id to squat it (and even a squatted id yields the uniform 201/503
+response, no oracle).
+
 ### `GET /healthz`
 Liveness. `200 OK`, body `ok`. No state, no auth.
 
@@ -93,6 +115,7 @@ Liveness. `200 OK`, body `ok`. No state, no auth.
 | `--mailbox-max-bytes` | 4194304 | per-mailbox byte cap |
 | `--max-mailboxes` | 100000 | global mailbox cap |
 | `--rate-create-per-min` | 10 | per-source mailbox creates |
+| `--rate-put-per-min-source` | 30 | per-source PUT create-at-id (§8) |
 | `--rate-deposit-per-min-source` | 60 | per-source deposits |
 | `--rate-deposit-per-min-mailbox` | 120 | per-mailbox deposits |
 | `--rate-ws-per-min-mailbox` | 6 | per-mailbox WS connects |
