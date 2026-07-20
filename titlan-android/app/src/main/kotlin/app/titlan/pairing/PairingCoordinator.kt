@@ -25,7 +25,7 @@ object PairingCoordinator {
 
     /**
      * Responder side: consumes scanned/linked `offerBytes` — runs PQXDH,
-     * creates this side's inbox, sends the proof-of-scan `inbox-handoff`, and
+     * creates this side's inbox, sends the proof-of-scan `pair-ack/2`, and
      * on the offerer's verified acceptance yields the new conversation id.
      * A non-default relay in the offer is surfaced to the user before this
      * runs (frozen design §3); this method assumes that confirmation.

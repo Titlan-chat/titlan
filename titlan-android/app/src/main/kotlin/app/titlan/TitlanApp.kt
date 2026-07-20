@@ -7,6 +7,7 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import android.view.WindowManager
+import app.titlan.core.AppCore
 
 /**
  * Application entry point. Central FLAG_SECURE enforcement
@@ -20,6 +21,9 @@ class TitlanApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Capture the app context for the single process-wide core (A3). Opening
+        // is still lazy — first pairing/sync call opens the encrypted store.
+        AppCore.init(this)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityPreCreated(
                 activity: Activity,

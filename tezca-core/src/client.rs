@@ -166,6 +166,14 @@ impl TitlanClient {
         Ok(conv)
     }
 
+    /// Reads the relay URL from a scanned v2 offer without establishing a
+    /// session (frozen §3: surface a non-default relay before pairing). Framing
+    /// stays in core (A3).
+    pub fn peek_offer_relay(&self, payload: &[u8]) -> Result<String> {
+        let (_, relay, _, _) = crate::pairing::parse_pairing_offer(payload)?;
+        Ok(relay)
+    }
+
     /// Lists conversation ids (most-recent first).
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>> {
         self.store.list_conversation_ids()

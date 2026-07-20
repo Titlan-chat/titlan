@@ -195,6 +195,13 @@ impl FfiClient {
         Ok(self.inner.begin_pairing_from_offer(&payload)?.to_vec())
     }
 
+    /// Reads the relay URL out of a scanned offer WITHOUT establishing a
+    /// session, so the UI can surface a non-default relay for confirmation
+    /// before pairing (frozen §3). Parsing stays in core (A3).
+    pub fn peek_offer_relay(&self, payload: Vec<u8>) -> std::result::Result<String, TitlanError> {
+        Ok(self.inner.peek_offer_relay(&payload)?)
+    }
+
     pub fn list_conversations(&self) -> std::result::Result<Vec<Vec<u8>>, TitlanError> {
         Ok(self
             .inner
