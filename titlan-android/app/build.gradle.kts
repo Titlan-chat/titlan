@@ -54,6 +54,12 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Default relay for THIS device's own inboxes (INV-5: per-conversation
+        // relay still overrides; this is only the bootstrap/pairing default).
+        // RFC 2606 placeholder for release — a real onboarding relay picker is
+        // post-MVP. Debug overrides it to the CI test relay (below).
+        buildConfigField("String", "RELAY_URL", "\"wss://relay.invalid\"")
     }
 
     buildTypes {
@@ -62,6 +68,15 @@ android {
             // No signingConfig on purpose: CI produces UNSIGNED release APKs.
             // Signing keys are external to the repo and to CI — see README
             // "Release signing".
+        }
+        debug {
+            // The instrumented suites reach the CI test relay over the emulator
+            // host loopback (10.0.2.2). The relay serves rcgen TLS; trust is a
+            // debug-only test anchor in the Rust rustls client (feature-gated,
+            // absent from release .so — check-invariants.sh), NOT the Android
+            // TLS stack: the core's own sockets never consult the platform
+            // network security config. Port set by the ci.yml relay launch.
+            buildConfigField("String", "RELAY_URL", "\"wss://10.0.2.2:8443\"")
         }
     }
 
@@ -158,6 +173,12 @@ dependencies {
     // JNA (AAR packaging): required at runtime by the UniFFI-generated
     // Kotlin bindings to load and call libtezca_core.so.
     implementation(variantOf(libs.jna) { artifactType("aar") })
+    // Pairing offer QR + camera scanner (design §5).
+    implementation(libs.zxing.core)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.runner)
