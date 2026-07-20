@@ -180,6 +180,55 @@ fn relay_healthy(port: u16) -> bool {
     raw.starts_with(b"HTTP/1.1 200")
 }
 
+/// Spawns the relay serving rcgen TLS (the CI android-instrumented posture)
+/// instead of --plain-http. Readiness: the plaintext /healthz probe cannot
+/// speak TLS, so the gate is TCP-accept + child-alive; the caller's first
+/// real client operation is the authoritative check. This file's TLS test
+/// runs alone in its binary, so the free_port hand-off race the plain-HTTP
+/// probe defends against does not arise here.
+pub fn spawn_relay_tls_at(
+    port: u16,
+    cert: &std::path::Path,
+    key: &std::path::Path,
+    extra: &[&str],
+    cwd: &std::path::Path,
+) -> RelayProc {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_tezca-relay"));
+    cmd.arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .arg("--tls-cert")
+        .arg(cert)
+        .arg("--tls-key")
+        .arg(key)
+        .args(extra)
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+    let child = cmd.spawn().expect("spawn tezca-relay binary (tls)");
+    let mut proc = RelayProc {
+        child: Some(child),
+        port,
+    };
+    let deadline = Instant::now() + STARTUP_TIMEOUT;
+    loop {
+        let addr = format!("127.0.0.1:{port}");
+        if TcpStream::connect_timeout(&addr.parse().expect("addr"), Duration::from_millis(100))
+            .is_ok()
+        {
+            return proc;
+        }
+        if let Ok(Some(status)) = proc.child_mut().try_wait() {
+            panic!("tls relay exited before listening (status {status})");
+        }
+        if Instant::now() > deadline {
+            proc.kill();
+            panic!("tls relay did not accept on {port} within {STARTUP_TIMEOUT:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 pub fn spawn_relay(extra: &[&str]) -> (RelayProc, tempfile::TempDir) {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let proc = spawn_relay_at(free_port(), extra, dir.path());

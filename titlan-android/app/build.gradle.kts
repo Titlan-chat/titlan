@@ -53,7 +53,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Custom runner (androidTest source set): exports the CI relay TLS pin
+        // from instrumentation args to the process env before app creation.
+        testInstrumentationRunner = "app.titlan.TitlanTestRunner"
 
         // Default relay for THIS device's own inboxes (INV-5: per-conversation
         // relay still overrides; this is only the bootstrap/pairing default).
@@ -97,7 +99,15 @@ android {
     sourceSets {
         getByName("main") {
             kotlin.srcDir(uniffiKotlinDir)
-            jniLibs.srcDir(rustJniLibsDir)
+        }
+        // Per-variant .so: the debug core carries the feature-gated CI relay
+        // trust anchor; the release core is built WITHOUT it (maintainer-
+        // ratified 4b-2; asserted by scripts/check-invariants.sh).
+        getByName("debug") {
+            jniLibs.srcDir(rustJniLibsDir.map { it.dir("debug") })
+        }
+        getByName("release") {
+            jniLibs.srcDir(rustJniLibsDir.map { it.dir("release") })
         }
     }
 }
@@ -107,9 +117,13 @@ android {
 // bindings are generated from the compiled library at build time — generated
 // sources and .so files live under build/, NEVER committed.
 
-val cargoNdkBuild by tasks.registering(Exec::class) {
+// Two cargo-ndk builds, one per variant: debug enables the feature-gated CI
+// relay trust anchor; release builds the identical crate WITHOUT it, so the
+// shipped .so contains no anchor code path (check-invariants.sh asserts the
+// split stays exactly here). Both share the cargo target dir — flipping
+// features between variants recompiles only tezca-core itself.
+fun Exec.cargoNdkCommon() {
     group = "build"
-    description = "Cross-compiles tezca-core for Android ABIs via cargo-ndk"
     workingDir = repoRoot
     environment(
         "ANDROID_NDK_HOME",
@@ -120,11 +134,29 @@ val cargoNdkBuild by tasks.registering(Exec::class) {
     // — AGP strips packaged jniLibs itself, so the APK is unaffected.
     environment("CARGO_PROFILE_RELEASE_STRIP", "none")
     environment("SOURCE_DATE_EPOCH", sourceDateEpoch)
+}
+
+val cargoNdkBuildDebug by tasks.registering(Exec::class) {
+    cargoNdkCommon()
+    description = "Cross-compiles tezca-core (with test-relay-anchor) for the debug APK"
     commandLine(
         "cargo", "ndk",
         "-t", "arm64-v8a",
         "-t", "x86_64",
-        "-o", rustJniLibsDir.get().asFile.absolutePath,
+        "-o", rustJniLibsDir.get().dir("debug").asFile.absolutePath,
+        "build", "--release", "-p", "tezca-core", "--locked",
+        "--features", "test-relay-anchor",
+    )
+}
+
+val cargoNdkBuildRelease by tasks.registering(Exec::class) {
+    cargoNdkCommon()
+    description = "Cross-compiles tezca-core (no test features) for the release APK"
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-t", "x86_64",
+        "-o", rustJniLibsDir.get().dir("release").asFile.absolutePath,
         "build", "--release", "-p", "tezca-core", "--locked",
     )
 }
@@ -132,7 +164,10 @@ val cargoNdkBuild by tasks.registering(Exec::class) {
 val generateUniffiBindings by tasks.registering(Exec::class) {
     group = "build"
     description = "Generates Kotlin bindings from libtezca_core.so (never committed)"
-    dependsOn(cargoNdkBuild)
+    // Bindings come from the debug .so: the FFI surface is identical across
+    // variants (the anchor feature touches no FFI), and debug is the variant
+    // every fast path (local dev, lint/unit/instrumented CI) already builds.
+    dependsOn(cargoNdkBuildDebug)
     workingDir = repoRoot
     commandLine(
         "cargo", "run", "-p", "uniffi-bindgen", "--locked", "--",
@@ -147,6 +182,11 @@ val generateUniffiBindings by tasks.registering(Exec::class) {
 tasks.named("preBuild") {
     dependsOn(generateUniffiBindings)
 }
+
+// The release jniLibs merge must see the anchor-free .so. (Debug is already
+// covered: preBuild → generateUniffiBindings → cargoNdkBuildDebug.)
+tasks.matching { it.name == "mergeReleaseJniLibFolders" || it.name == "mergeReleaseNativeLibs" }
+    .configureEach { dependsOn(cargoNdkBuildRelease) }
 
 kotlin {
     compilerOptions {

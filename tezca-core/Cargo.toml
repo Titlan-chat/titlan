@@ -44,6 +44,14 @@ rustls-platform-verifier = { workspace = true }
 ring = { workspace = true }
 uniffi = { workspace = true }
 
+[features]
+# Debug/CI-only trust anchor for the test relay (maintainer-ratified 4b-2):
+# with this feature AND TEZCA_TEST_RELAY_PIN (hex SHA-256 of the relay's leaf
+# cert DER) set, connections carrying no per-conversation pin trust exactly
+# that certificate via the audited ws/pin.rs PinVerifier. Never a default;
+# never in the release .so (scripts/check-invariants.sh asserts both).
+test-relay-anchor = []
+
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = { workspace = true }

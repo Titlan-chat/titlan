@@ -128,6 +128,31 @@ if [ -n "$cleartext_stray" ]; then
   echo "$cleartext_stray"
   fail=1
 fi
+# 5c. The Rust-side CI relay trust anchor (tezca-core `test-relay-anchor`,
+#     maintainer-ratified 4b-2) must never become a default feature — default
+#     features would put the anchor code into every consumer, release included.
+if grep -E '^default *=' tezca-core/Cargo.toml | grep -qF 'test-relay-anchor'; then
+  echo "test-relay-anchor is a DEFAULT feature of tezca-core — release .so would carry the anchor"
+  fail=1
+fi
+# 5d. The Android build enables the anchor feature ONLY in the debug cargo
+#     task. Positive control first: if the debug task stops naming the feature
+#     (rename/refactor), this check must fail loudly rather than pass vacuously.
+gradle_build="${android_app}/build.gradle.kts"
+debug_block=$(awk '/^val cargoNdkBuildDebug/{f=1} f{print} f&&/^\}$/{exit}' "$gradle_build")
+release_block=$(awk '/^val cargoNdkBuildRelease/{f=1} f{print} f&&/^\}$/{exit}' "$gradle_build")
+if ! printf '%s' "$debug_block" | grep -qF 'test-relay-anchor'; then
+  echo "positive control failed: cargoNdkBuildDebug no longer enables test-relay-anchor (check 5d is blind)"
+  fail=1
+fi
+if printf '%s' "$release_block" | grep -qF 'test-relay-anchor'; then
+  echo "cargoNdkBuildRelease enables test-relay-anchor — release .so would carry the anchor"
+  fail=1
+fi
+if [ -z "$release_block" ]; then
+  echo "cargoNdkBuildRelease task not found in ${gradle_build} (check 5d cannot verify the release build)"
+  fail=1
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo

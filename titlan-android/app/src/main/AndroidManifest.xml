@@ -11,6 +11,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Runtime-granted; the persistent FGS notification is the only post. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Pairing QR scanner (frozen design §5). Camera-less devices still pair
+         via the titlan:// link flow, so no camera feature is required. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
 
     <application
         android:name=".TitlanApp"

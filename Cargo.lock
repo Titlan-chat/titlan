@@ -2785,6 +2785,7 @@ dependencies = [
  "futures",
  "rand 0.9.5",
  "rcgen",
+ "ring",
  "rustix",
  "rustls",
  "tempfile",

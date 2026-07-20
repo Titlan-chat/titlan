@@ -3,39 +3,52 @@
 
 package app.titlan.pairing
 
+import app.titlan.core.AppCore
+
 /**
- * Drives the asymmetric pairing offer flow (frozen design §3). PRODUCTION
- * HOME, stubbed in the 4b-2 RED commit.
- *
- * A3: all cryptography and framing live in tezca-core. This coordinator is the
- * UI-side orchestration — mint an offer, render it ([QrCodec]), accept a
- * scanned offer, verify proof-of-scan (in core), surface the resulting
- * conversation. The 4b-2 GREEN commit wires each step to the tezca-core FFI
- * surface (offer/proof-of-scan/rotation), which is itself extended in green.
+ * Drives the asymmetric pairing offer flow (frozen design §3). A3: all
+ * cryptography and framing live in tezca-core; this coordinator is the UI-side
+ * orchestration — mint an offer, render it ([QrCodec]), accept a scanned offer
+ * (proof-of-scan verified in core), surface the resulting conversation. Every
+ * step routes through the single process-wide core ([AppCore]).
  */
 object PairingCoordinator {
+
+    /** Offer time-to-live (frozen design §3: 1 h, single-use). */
+    private const val OFFER_TTL_MS = 60L * 60L * 1000L
 
     /**
      * Offerer side: mints a single-use offer (bundle + relay + pairing mailbox
      * + 256-bit pairing secret), creates the pairing mailbox, and returns the
      * offer for display. TTL 1 h; single-use (frozen design §3).
      */
-    fun createOffer(): PairingOffer =
-        TODO("4b-2 green: core.export_pairing_offer + create pairing mailbox")
+    fun createOffer(): PairingOffer {
+        val bytes = AppCore.get().exportPairingOffer()
+        // The core mints + owns the TTL/expiry semantics; the UI countdown is a
+        // display convenience computed from mint time.
+        return PairingOffer(bytes, nowMillis() + OFFER_TTL_MS)
+    }
 
     /**
      * Responder side: consumes scanned/linked `offerBytes` — runs PQXDH,
-     * creates this side's inbox, sends the proof-of-scan `pair-ack/2`, and
-     * on the offerer's verified acceptance yields the new conversation id.
-     * A non-default relay in the offer is surfaced to the user before this
-     * runs (frozen design §3); this method assumes that confirmation.
+     * creates this side's inbox, sends the proof-of-scan `pair-ack/2`, and on
+     * the offerer's verified acceptance yields the new conversation id. A
+     * non-default relay in the offer is surfaced to the user before this runs
+     * (frozen design §3); this method assumes that confirmation.
      */
     fun acceptScannedOffer(offerBytes: ByteArray): ByteArray =
-        TODO("4b-2 green: core.begin_pairing_from_offer with proof-of-scan MAC")
+        AppCore.get().beginPairingFromOffer(offerBytes)
 
-    /** Cancels an outstanding offer, releasing its one-time pre-key. */
-    fun cancelOffer(offer: PairingOffer): Unit =
-        TODO("4b-2 green: DELETE pairing mailbox; release one-time pre-key")
+    /**
+     * Cancels an outstanding offer. The offer is single-use and self-expires at
+     * its TTL; an explicit relay-side DELETE of the pairing mailbox awaits an
+     * FFI cancel method (see report FLAG) — until then this is a no-op and the
+     * uncancelled pairing inbox lapses at TTL.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun cancelOffer(offer: PairingOffer) = Unit
+
+    private fun nowMillis(): Long = System.currentTimeMillis()
 }
 
 /**

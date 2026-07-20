@@ -81,9 +81,7 @@ enum Recovery {
 impl Engine {
     pub(crate) fn new(store: Arc<Store>, my_relay: String, handle: Handle) -> Result<Arc<Self>> {
         ws::install_ring_provider();
-        let http = reqwest::Client::builder()
-            .build()
-            .map_err(|e| CoreError::Network(e.to_string()))?;
+        let http = ws::build_http_client()?;
         Ok(Arc::new(Engine {
             store,
             my_relay,
