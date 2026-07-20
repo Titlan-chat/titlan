@@ -47,10 +47,15 @@ impl Inbox {
 #[derive(Default)]
 struct States {
     states: Mutex<Vec<ConnectionState>>,
+    needs_repair: std::sync::atomic::AtomicBool,
 }
 impl ConnectionObserver for States {
     fn on_state(&self, _id: ConversationId, s: ConnectionState) {
         self.states.lock().expect("states").push(s);
+    }
+    fn on_conversation_needs_repair(&self, _id: ConversationId) {
+        self.needs_repair
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 impl States {
@@ -60,6 +65,9 @@ impl States {
             .expect("states")
             .iter()
             .any(|s| s == want)
+    }
+    fn saw_needs_repair(&self) -> bool {
+        self.needs_repair.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -192,6 +200,132 @@ fn v2_two_consecutive_total_losses_each_recover() {
     relay = spawn_relay_at(port, GENEROUS_LIMITS, d.path());
     bob.send_chat(&conv_b, "after loss 2").unwrap();
     wait_until(|| alice_rx.texts().contains(&"after loss 2".to_string()));
+    drop(relay);
+}
+
+/// v2 §8 exhaustion → conversation-needs-repair, with NO timer dependence. The
+/// peer is genuinely UNREACHABLE (its relay stays down after pairing), so no
+/// verified `recovery-hello` ever returns to Alice. Each restart of ALICE's
+/// relay wipes her receive inbox, so she runs one recovery cycle — bumping her
+/// generation and re-probing the peer's (dead) relay. After the crate-private
+/// 3-cycle bound with no contact, recovery is exhausted and the engine surfaces
+/// `RePairRequired` + `on_conversation_needs_repair`.
+///
+/// Two relays are used deliberately: on a SHARED relay a live peer co-recovers
+/// on every restart and converges Alice's generation, resetting the cycle
+/// counter — so exhaustion-by-no-contact is only reachable when the peer is
+/// actually unreachable (see the report FLAG). This is driven ENTIRELY by real
+/// relay lifecycle + real generation advancement — no test-only hook on the
+/// production surface. Exhaustion fires on the count-based 3-cycle bound (not
+/// the 24h timer), which is why the test is deterministic; the generation-
+/// OFFSET ≥ W arm is not the independent trigger here (report FLAG).
+#[test]
+fn v2_peer_unreachable_exhausts_recovery_and_needs_repair() {
+    let dir = TempDir::new().unwrap();
+    let da = TempDir::new().unwrap();
+    let db = TempDir::new().unwrap();
+    let port_a = free_port();
+    let mut relay_a = spawn_relay_at(port_a, GENEROUS_LIMITS, da.path());
+    let mut relay_b = spawn_relay_at(free_port(), GENEROUS_LIMITS, db.path());
+    let url_a = format!("ws://{}", relay_a.base());
+    let url_b = format!("ws://{}", relay_b.base());
+
+    let alice = new_client(&dir, "alice.db", &url_a); // offerer, on relay A
+    let bob = new_client(&dir, "bob.db", &url_b); // responder, on relay B
+    let alice_rx = Arc::new(Inbox::default());
+    let alice_st = Arc::new(States::default());
+    alice
+        .start_sync(alice_st.clone(), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    let conv_a = alice.list_conversations().unwrap()[0];
+    bob.send_chat(&conv_b, "before offline").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"before offline".to_string()));
+
+    // The peer's relay goes down for good: Bob can neither recover his own inbox
+    // nor deposit a recovery-hello to Alice. Alice will never get verified
+    // contact, so her probe cycles accumulate with no reset.
+    relay_b.kill();
+    drop((bob, relay_b));
+
+    // Restart ALICE's relay repeatedly. Each restart wipes her receive inbox →
+    // 404 → one recovery cycle (`Recovering`, generation bump). With no peer
+    // contact the 3-cycle bound (crate-private `RECOVERY_PROBE_CYCLES`, not
+    // re-exported for a test) is reached and recovery is declared exhausted. A
+    // 4th restart is slack in case a restart races Alice's reconnect.
+    for _ in 0..4 {
+        relay_a.kill();
+        relay_a = spawn_relay_at(port_a, GENEROUS_LIMITS, da.path());
+        if alice_st.saw(&ConnectionState::RePairRequired) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    wait_until(|| alice_st.saw(&ConnectionState::RePairRequired));
+    assert!(
+        alice_st.saw_needs_repair(),
+        "exhausted v2 recovery must surface on_conversation_needs_repair"
+    );
+    assert!(
+        alice.list_conversations().unwrap().contains(&conv_a),
+        "the conversation is retained (re-pair is the user's next action)"
+    );
+    drop(relay_a);
+}
+
+/// v2 shared-relay analog of pending-deliver-after-reconnect: Alice queues a
+/// chat while the relay is DOWN (deposit fails → held locally, never lost),
+/// then on the relay's return both sides recover via derived mailboxes and the
+/// queued message flushes through and is delivered. Unlike the retired
+/// two-relay test — where Alice's own inbox survived and only the peer's relay
+/// bounced — a shared-relay restart is a total loss for BOTH inboxes, so the
+/// reconnect here rides a §10.7 generation bump. The client-side queue-and-
+/// flush guarantee (INV: a send is durable across a transport outage) is the
+/// invariant under test.
+#[test]
+fn v2_message_queued_while_relay_down_delivers_after_recovery() {
+    let dir = TempDir::new().unwrap();
+    let d = TempDir::new().unwrap();
+    let port = free_port();
+    let mut relay = spawn_relay_at(port, GENEROUS_LIMITS, d.path());
+    let url = format!("ws://{}", relay.base());
+
+    let alice = new_client(&dir, "alice.db", &url); // offerer
+    let bob = new_client(&dir, "bob.db", &url); // responder
+    let alice_rx = Arc::new(Inbox::default());
+    let bob_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), bob_rx.clone())
+        .unwrap();
+
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    let conv_a = alice.list_conversations().unwrap()[0];
+    bob.send_chat(&conv_b, "before down").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"before down".to_string()));
+
+    // Relay down: Alice's deposit fails → the message is held pending locally.
+    relay.kill();
+    alice.send_chat(&conv_a, "queued while down").unwrap();
+    assert!(
+        alice
+            .messages(&conv_a)
+            .unwrap()
+            .iter()
+            .any(|m| m.body == b"queued while down"),
+        "the message must be held locally, not lost, while the relay is down"
+    );
+
+    // Relay back: both recover via derived mailboxes and the pending message
+    // flushes through to Bob.
+    relay = spawn_relay_at(port, GENEROUS_LIMITS, d.path());
+    wait_until(|| bob_rx.texts().contains(&"queued while down".to_string()));
     drop(relay);
 }
 
