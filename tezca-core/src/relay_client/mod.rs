@@ -510,16 +510,17 @@ impl Engine {
     ) -> Recovery {
         // Exhaustion (frozen §8), two conditions → conversation-needs-repair:
         //  (1) relative generation offset ≥ W (unrecoverable in-band); or
-        //  (2) 3 probe cycles with no verified peer contact (peer offline).
-        //      A verified recovery-hello resets the cycle counter; relay 429s
-        //      are pacing and never counted (they are absorbed by put_create).
+        //  (2) 3 COMPLETED probe cycles with no verified peer contact (peer
+        //      offline). A cycle counts only after the probe actually ran
+        //      (derived inboxes created, recovery-hello deposited) — an attempt
+        //      the relay 429-paced (or that failed at setup) never counts,
+        //      per the ratified §8 pacing rule. A verified recovery-hello
+        //      resets the counter.
         let exhausted_cycles = {
             let mut map = self.exhaustion.lock().expect("exhaustion");
-            let t = map
-                .entry(*conv)
-                .or_insert_with(crate::recovery::ExhaustionTracker::new);
-            t.note_probe_cycle();
-            t.is_exhausted()
+            map.entry(*conv)
+                .or_insert_with(crate::recovery::ExhaustionTracker::new)
+                .is_exhausted()
         };
         if exhausted_cycles
             || (crate::recovery::GenerationState {
@@ -537,6 +538,14 @@ impl Engine {
             .enter_recovery_gen(conv, convo, own_role, root, g, peer_gen)
             .await
         {
+            // The probe ran to completion with no contact yet — THIS is the
+            // countable cycle (verified contact later resets the tracker).
+            self.exhaustion
+                .lock()
+                .expect("exhaustion")
+                .entry(*conv)
+                .or_insert_with(crate::recovery::ExhaustionTracker::new)
+                .note_probe_cycle();
             Recovery::OneSided
         } else {
             Recovery::Failed
