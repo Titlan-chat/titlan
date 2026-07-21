@@ -208,9 +208,20 @@ jobs:
           # unit does in production.
           sudo prlimit --memlock=unlimited:unlimited --pid $$
           echo "memlock limit: $(ulimit -l)"
+          # Test-lane rate limits, mirroring the Rust e2e harness's
+          # GENEROUS_LIMITS (tezca-relay/tests/common/mod.rs): the whole
+          # emulator is ONE source IP, and the suite performs 15 mailbox
+          # creates in under a minute — the production default of
+          # 10 creates/min/source 429'd pairing setup at creates #11/#12
+          # (run 29803163714). Production defaults are untouched; the
+          # relay's own limits/put_mailbox suites still test them.
           nohup ./target/release/tezca-relay \
             --tls-cert relay-certs/cert.pem --tls-key relay-certs/key.pem \
             --listen 0.0.0.0:8443 \
+            --rate-create-per-min 100000 \
+            --rate-deposit-per-min-source 1000000 \
+            --rate-deposit-per-min-mailbox 1000000 \
+            --rate-ws-per-min-mailbox 100000 \
             > relay.log 2>&1 &
           for _ in $(seq 1 50); do
             # -k: the probe only checks liveness; certificate trust is the

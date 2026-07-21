@@ -117,7 +117,8 @@ class RecoveryTest {
      */
     private fun diag(claim: String, relay: FakeRelay, events: RecordingEvents): String =
         claim +
-            " [FakeRelay accepts=${relay.accepts.get()}" +
+            " [FakeRelay bound=${relay.boundAddress}" +
+            " accepts=${relay.accepts.get()}" +
             " requests=${relay.requestLog.toList()}" +
             " | states=${events.states.map { it.second }}" +
             " | storageErrors=${events.storageErrors.toList()}" +

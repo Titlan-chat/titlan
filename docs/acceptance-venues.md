@@ -36,6 +36,18 @@ duplicates the other.
 
 ## Ledgered follow-ups
 
+- **INV-5 gap on the receive path (4b-3 / Phase 5 invariant-audit item,
+  recorded 2026-07-21).** `set_conversation_relay` repoints the SEND side
+  only (`conversations.relay_url`, consumed by `flush_pending` and the
+  recovery deposit legs). The subscribe/receive endpoint is the
+  engine-global `my_relay` — the `open()` parameter — at
+  `relay_client/mod.rs:816`, so per-conversation relay selection is not yet
+  honored on the receive path: a conversation "moved" to another relay
+  still receives on the device's default relay. No behavior change was made
+  when this was found (evidence: `~/4b2-relay-selection-evidence.md`); the
+  Phase 5 invariant audit should decide whether INV-5's "every conversation
+  may override" extends to the receive leg and, if so, how the listener
+  learns a per-conversation endpoint.
 - **Pairing-offer cancel (relay-side DELETE).** The pairing screen's dismiss
   action does not (and must not claim to) cancel an outstanding offer: local
   invalidation of the offer's single-use state requires a core FFI cancel

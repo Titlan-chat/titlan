@@ -24,7 +24,11 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class FakeRelay(private val putStatus: Int) : AutoCloseable {
 
-    private val server = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
+    // Bind EXPLICITLY to the IPv4 loopback: the core dials the literal
+    // authority "127.0.0.1:<port>". InetAddress.getLoopbackAddress() may
+    // resolve to ::1 on Android, and a ::1-bound listener refuses a
+    // 127.0.0.1 connect — run 29803163714's accepts=0 signature.
+    private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
 
     /** PUT create-at-id attempts served (the recovery probe's first leg). */
     val putRequests = AtomicInteger(0)
@@ -43,8 +47,14 @@ class FakeRelay(private val putStatus: Int) : AutoCloseable {
     @Volatile
     private var running = true
 
+    /** The ACTUAL bound address, for diagnostics ("host:port"). */
+    val boundAddress: String
+        get() = "${server.inetAddress.hostAddress}:${server.localPort}"
+
+    // Derived from the socket's real bound address — the advertised URL and
+    // the listening host can never diverge again.
     val url: String
-        get() = "ws://127.0.0.1:${server.localPort}"
+        get() = "ws://$boundAddress"
 
     init {
         Thread(
