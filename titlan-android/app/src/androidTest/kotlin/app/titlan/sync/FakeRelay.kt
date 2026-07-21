@@ -7,6 +7,7 @@ import java.io.BufferedInputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -28,6 +29,17 @@ class FakeRelay(private val putStatus: Int) : AutoCloseable {
     /** PUT create-at-id attempts served (the recovery probe's first leg). */
     val putRequests = AtomicInteger(0)
 
+    /** Accepted TCP connections (0 ⇒ the core never contacted this relay). */
+    val accepts = AtomicInteger(0)
+
+    /**
+     * Ordered request log, "METHOD path -> status" per served request
+     * (instrumentation only — response behavior is unchanged). Lets a failure
+     * message state exactly what the core did: subscribe GETs, v1-fallback
+     * POSTs, and recovery PUTs are all visible, not just the PUT counter.
+     */
+    val requestLog = CopyOnWriteArrayList<String>()
+
     @Volatile
     private var running = true
 
@@ -43,6 +55,7 @@ class FakeRelay(private val putStatus: Int) : AutoCloseable {
                     } catch (_: Exception) {
                         break
                     }
+                    accepts.incrementAndGet()
                     Thread({ handle(socket) }, "fake-relay-conn")
                         .apply { isDaemon = true }
                         .start()
@@ -81,6 +94,7 @@ class FakeRelay(private val putStatus: Int) : AutoCloseable {
                 method == "POST" && path.endsWith("/messages") -> "202 Accepted"
                 else -> "404 Not Found"
             }
+            requestLog += "$method $path -> $status"
             val pacing = if (status.startsWith("429")) "Retry-After: 1\r\n" else ""
             s.getOutputStream().write(
                 "HTTP/1.1 $status\r\n${pacing}Content-Length: 0\r\nConnection: close\r\n\r\n"

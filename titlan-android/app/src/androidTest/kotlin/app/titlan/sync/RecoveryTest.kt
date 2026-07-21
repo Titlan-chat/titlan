@@ -55,6 +55,12 @@ class RecoveryTest {
         val states = CopyOnWriteArrayList<Pair<ByteArray, ConnectionState>>()
         val needsRepair = CopyOnWriteArrayList<ByteArray>()
 
+        // Captured for failure-message diagnostics only (never asserted on):
+        // the two existing frozen-§1 error events. Core currently emits
+        // storage-error only from flush_pending; nothing new is added here.
+        val storageErrors = CopyOnWriteArrayList<String>()
+        val sendFailures = CopyOnWriteArrayList<Pair<ByteArray, ByteArray>>()
+
         override fun onMessageArrived(conversationId: ByteArray, messageId: ByteArray) = Unit
 
         override fun onConnectionState(
@@ -69,9 +75,13 @@ class RecoveryTest {
             needsRepair += conversationId
         }
 
-        override fun onPermanentSendFailure(conversationId: ByteArray, messageId: ByteArray) = Unit
+        override fun onPermanentSendFailure(conversationId: ByteArray, messageId: ByteArray) {
+            sendFailures += conversationId to messageId
+        }
 
-        override fun onStorageError(detail: String) = Unit
+        override fun onStorageError(detail: String) {
+            storageErrors += detail
+        }
 
         fun awaitState(want: ConnectionState, timeoutMs: Long): Boolean =
             await(timeoutMs) { states.any { it.second == want } }
@@ -96,6 +106,22 @@ class RecoveryTest {
         assertNotNull("offerer-side conversation must exist after pairing", conv)
         return conv!!
     }
+
+    /**
+     * Failure-message diagnostics (instrumentation only — pass/fail conditions
+     * are untouched): what the core actually did to the relay double (every
+     * request + accepted-connection count), the observed §1 state sequence,
+     * and any captured storage-error / permanent-send-failure events. Run
+     * 29800890689 failed with zero visibility; this makes the next failure
+     * self-diagnosing.
+     */
+    private fun diag(claim: String, relay: FakeRelay, events: RecordingEvents): String =
+        claim +
+            " [FakeRelay accepts=${relay.accepts.get()}" +
+            " requests=${relay.requestLog.toList()}" +
+            " | states=${events.states.map { it.second }}" +
+            " | storageErrors=${events.storageErrors.toList()}" +
+            " | permanentSendFailures=${events.sendFailures.size}]"
 
     /**
      * (was singleTotalLossRecoversViaDerivedMailboxes; convergence graded by
@@ -179,12 +205,13 @@ class RecoveryTest {
             val events = RecordingEvents()
             CoreClientFactory.open(aDb.path, aKey, amnesiac.url).use { a ->
                 a.startSync(events)
+                val surfaced = await(30_000) { events.needsRepair.isNotEmpty() }
                 assertTrue(
-                    "needs-repair must surface through the FFI on exhaustion",
-                    await(30_000) { events.needsRepair.isNotEmpty() },
+                    diag("needs-repair must surface through the FFI on exhaustion", amnesiac, events),
+                    surfaced,
                 )
                 assertTrue(
-                    "needs-repair must carry the conversation id",
+                    diag("needs-repair must carry the conversation id", amnesiac, events),
                     events.needsRepair.any { it.contentEquals(conv!!) },
                 )
             }
@@ -209,16 +236,17 @@ class RecoveryTest {
             val events = RecordingEvents()
             CoreClientFactory.open(aDb.path, aKey, pacing.url).use { a ->
                 a.startSync(events)
+                val observed = await(30_000) { pacing.putRequests.get() >= 4 }
                 assertTrue(
-                    "positive control: ≥4 paced recovery attempts must be observed",
-                    await(30_000) { pacing.putRequests.get() >= 4 },
+                    diag("positive control: ≥4 paced recovery attempts must be observed", pacing, events),
+                    observed,
                 )
                 assertTrue(
-                    "positive control: sync must be live (CONNECTING seen)",
+                    diag("positive control: sync must be live (CONNECTING seen)", pacing, events),
                     events.states.any { it.second == ConnectionState.CONNECTING },
                 )
                 assertTrue(
-                    "429 pacing must never surface needs-repair (frozen §8)",
+                    diag("429 pacing must never surface needs-repair (frozen §8)", pacing, events),
                     events.needsRepair.isEmpty(),
                 )
             }
