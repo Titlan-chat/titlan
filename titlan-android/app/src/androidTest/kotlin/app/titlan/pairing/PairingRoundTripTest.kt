@@ -4,6 +4,11 @@
 package app.titlan.pairing
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import app.titlan.BuildConfig
+import app.titlan.core.CoreClientFactory
+import java.io.File
+import java.security.SecureRandom
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,6 +26,13 @@ import org.junit.runner.RunWith
  * fail with `kotlin.NotImplementedError` at the first stub — the byte-identity
  * method at [QrCodec.encodeQr], the round-trip method at
  * [PairingCoordinator.createOffer]. GREEN turns them green.
+ *
+ * F1 (maintainer-ratified 2026-07-21): the responder half of the round trip is
+ * a SECOND core client on a scratch DB — a real second device. One identity
+ * cannot pair with itself (peer address == local address in the session
+ * layer), so the red commit's single-AppCore shape was undrivable. Production
+ * API only ([CoreClientFactory.open] + beginPairingFromOffer); the asserted
+ * property is unchanged.
  */
 @RunWith(AndroidJUnit4::class)
 class PairingRoundTripTest {
@@ -57,7 +69,19 @@ class PairingRoundTripTest {
 
         // Frame injection at the codec boundary (design §9a): render then decode.
         val decoded = QrCodec.decodeQr(QrCodec.encodeQr(offer.bytes))
-        val conversationId = PairingCoordinator.acceptScannedOffer(decoded)
+
+        // The scanning side is a real second device: a scratch core client
+        // (F1). The app-side offerer path — proof-of-scan verification and the
+        // inbox handoff — still runs in production code behind
+        // [PairingCoordinator.createOffer].
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val peerDb = File(context.cacheDir, "pairing-peer-scratch.db").also { it.delete() }
+        val peerKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val conversationId =
+            CoreClientFactory.open(peerDb.path, peerKey, BuildConfig.RELAY_URL).use { peer ->
+                peer.initializeIdentity()
+                peer.beginPairingFromOffer(decoded)
+            }
 
         assertTrue("a conversation id must be returned on success", conversationId.isNotEmpty())
     }

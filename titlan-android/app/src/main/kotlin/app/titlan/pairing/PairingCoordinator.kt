@@ -39,14 +39,13 @@ object PairingCoordinator {
     fun acceptScannedOffer(offerBytes: ByteArray): ByteArray =
         AppCore.get().beginPairingFromOffer(offerBytes)
 
-    /**
-     * Cancels an outstanding offer. The offer is single-use and self-expires at
-     * its TTL; an explicit relay-side DELETE of the pairing mailbox awaits an
-     * FFI cancel method (see report FLAG) — until then this is a no-op and the
-     * uncancelled pairing inbox lapses at TTL.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    fun cancelOffer(offer: PairingOffer) = Unit
+    // There is deliberately NO cancelOffer here: true cancellation (stop the
+    // core pairing listener, forget the secret, DELETE the pairing mailbox on
+    // the relay) needs a core FFI cancel method — new FFI surface, flagged
+    // rather than added (F3, 2026-07-21; ledgered in
+    // docs/acceptance-venues.md). Until it lands, a dismissed offer remains
+    // single-use and lapses at its 1 h TTL, and the UI says so honestly
+    // instead of claiming a cancellation that does not happen.
 
     private fun nowMillis(): Long = System.currentTimeMillis()
 }

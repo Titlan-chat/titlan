@@ -114,10 +114,7 @@ fun PairingScreen() {
             is OfferLifecycle.Active -> OfferSection(
                 offer = state.offer,
                 onExpired = { offer = OfferLifecycle.Expired },
-                onCancel = {
-                    PairingCoordinator.cancelOffer(state.offer)
-                    offer = null
-                },
+                onDismiss = { offer = null },
             )
 
             is OfferLifecycle.Paired ->
@@ -131,9 +128,16 @@ fun PairingScreen() {
     }
 }
 
-/** Offerer view: the QR + link, with a TTL watch that flips to Expired. */
+/**
+ * Offerer view: the QR + link, with a TTL watch that flips to Expired.
+ *
+ * Dismissing does NOT cancel the offer, and the UI must never claim it does
+ * (F3): true cancellation awaits a core FFI cancel method (ledgered follow-up,
+ * docs/acceptance-venues.md). The offer stays single-use and scannable until
+ * its TTL, and the dismiss row states the remaining validity honestly.
+ */
 @Composable
-private fun OfferSection(offer: PairingOffer, onExpired: () -> Unit, onCancel: () -> Unit) {
+private fun OfferSection(offer: PairingOffer, onExpired: () -> Unit, onDismiss: () -> Unit) {
     val qr = remember(offer) { renderQr(QrCodec.encodeQr(offer.bytes)) }
 
     // Force max screen brightness while the QR is on screen; restore on
@@ -156,7 +160,10 @@ private fun OfferSection(offer: PairingOffer, onExpired: () -> Unit, onCancel: (
     Text("Scan this to pair", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
     Image(bitmap = qr.asImageBitmap(), contentDescription = "Pairing QR code")
     Text(QrCodec.encodeLink(offer.bytes))
-    Button(onClick = onCancel) { Text("Cancel offer") }
+    val remainingMinutes =
+        ((offer.expiresAtEpochMillis - System.currentTimeMillis()) / 60_000L).coerceAtLeast(0)
+    Text("This offer stays scannable for about $remainingMinutes min (single-use).")
+    Button(onClick = onDismiss) { Text("Dismiss") }
 
     LaunchedEffect(offer) {
         val remaining = offer.expiresAtEpochMillis - System.currentTimeMillis()
