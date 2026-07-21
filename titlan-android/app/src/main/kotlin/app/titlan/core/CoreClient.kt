@@ -3,6 +3,8 @@
 
 package app.titlan.core
 
+import android.util.Log
+import app.titlan.BuildConfig
 import app.titlan.sync.ConnectionState
 import app.titlan.sync.SyncEvents
 import uniffi.tezca_core.FfiClient
@@ -89,9 +91,25 @@ private class FfiCoreClient(private val ffi: FfiClient) : CoreClient {
     override fun close() = ffi.close()
 }
 
+/**
+ * Debug delivery sentinel (device checklist f, maintainer-ratified F1): ONE
+ * fixed logcat line marking the moment an inbound chat completes the
+ * ack-after-persist contract (frozen §1: core invokes the receiver only after
+ * decrypt AND durable persist), giving the doze-latency measurement its t1.
+ * Both values are frozen pure literals — never interpolate identifiers,
+ * counts, or any state into this line (§9d/INV-1;
+ * scripts/check-invariants.sh §6 pins the shape, and
+ * scripts/device-doze-latency.sh waits on these exact strings).
+ */
+private const val DELIVERY_SENTINEL_TAG = "TitlanDelivery"
+private const val DELIVERY_SENTINEL_TEXT = "chat delivery persisted"
+
 /** Fans core message delivery into the app's [SyncEvents]. */
 private class ReceiverAdapter(private val events: SyncEvents) : FfiMessageReceiver {
     override fun onMessage(conversationId: ByteArray, message: FfiMessage) {
+        // Emitted before the event fans out so an observer failure can never
+        // suppress the marker; debug builds only.
+        if (BuildConfig.DEBUG) Log.i(DELIVERY_SENTINEL_TAG, DELIVERY_SENTINEL_TEXT)
         // Body is read from the store by id (frozen §1); the event carries ids
         // only, so a leaked event object never carries plaintext.
         events.onMessageArrived(conversationId, message.id)

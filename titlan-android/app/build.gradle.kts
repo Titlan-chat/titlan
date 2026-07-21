@@ -78,7 +78,19 @@ android {
             // absent from release .so — check-invariants.sh), NOT the Android
             // TLS stack: the core's own sockets never consult the platform
             // network security config. Port set by the ci.yml relay launch.
-            buildConfigField("String", "RELAY_URL", "\"wss://10.0.2.2:8443\"")
+            //
+            // Device checklist (f) (maintainer-ratified F3):
+            // -PtitlanDebugRelayUrl=wss://<LAN-host>:<port> points the DEBUG
+            // build at a tezca-relay on the build host's LAN address for a
+            // physical Pixel; unset, the emulator host-loopback default
+            // stands. Debug-only by construction — the release buildType and
+            // defaultConfig never read the property
+            // (scripts/check-invariants.sh §7).
+            buildConfigField(
+                "String",
+                "RELAY_URL",
+                "\"${providers.gradleProperty("titlanDebugRelayUrl").getOrElse("wss://10.0.2.2:8443")}\"",
+            )
         }
     }
 
