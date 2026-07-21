@@ -153,6 +153,37 @@ if [ -z "$release_block" ]; then
   echo "cargoNdkBuildRelease task not found in ${gradle_build} (check 5d cannot verify the release build)"
   fail=1
 fi
+# 5e. Artifact-level anchor split (automated 2026-07-21, was a manual check):
+#     when the per-variant .so artifacts exist — the CI android job re-runs
+#     this script after assembleDebug + assembleRelease; the early
+#     repo-invariants job prints the skip note because nothing is built yet —
+#     the anchor env-var string must be PRESENT in every debug .so (positive
+#     control: proves the scan can see it) and ABSENT from every release .so.
+#     grep -a: these are binary scans by design (grep otherwise declines
+#     binary payloads and would pass vacuously).
+anchor_str='TEZCA_TEST_RELAY_PIN'
+so_root="${android_app}/build/rustJniLibs"
+scanned_debug=0
+scanned_release=0
+for so in "$so_root"/debug/*/libtezca_core.so; do
+  [ -f "$so" ] || continue
+  scanned_debug=1
+  if ! grep -aq "$anchor_str" "$so"; then
+    echo "positive control failed: anchor string ABSENT from debug .so ($so) — 5e cannot prove release absence"
+    fail=1
+  fi
+done
+for so in "$so_root"/release/*/libtezca_core.so; do
+  [ -f "$so" ] || continue
+  scanned_release=1
+  if grep -aq "$anchor_str" "$so"; then
+    echo "release .so carries the test-anchor string ($so) — the anchor leaked into release"
+    fail=1
+  fi
+done
+if [ "$scanned_debug" -eq 0 ] || [ "$scanned_release" -eq 0 ]; then
+  echo "note: 5e artifact scan skipped (debug=$scanned_debug release=$scanned_release — .so not built in this run)"
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo

@@ -159,7 +159,13 @@ jobs:
           tool: cargo-ndk
       - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
         working-directory: .
-      - run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+      # assembleRelease is built here too so the 5e artifact scan below can
+      # assert the anchor split on BOTH variants' .so (debug carries the
+      # test-anchor string, release must not).
+      - run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+      - name: Invariants incl. artifact-level anchor split (5e)
+        run: ./scripts/check-invariants.sh
+        working-directory: .
 
   android-instrumented:
     name: Android — instrumented (Keystore wrap, INV-1 at-rest)
