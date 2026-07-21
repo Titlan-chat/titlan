@@ -10,6 +10,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.UserManager
 
 /**
  * The always-on receive-sync foreground service (frozen design §1, §7). Thin
@@ -28,6 +29,18 @@ class SyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Frozen §2 at EVERY entry point (C2-D2): a sticky revival reaches
+        // here without passing SyncController.start's gate. With the device
+        // locked, CE storage is sealed — decline cleanly per §2: stop before
+        // going foreground (no notification; stopping within onStartCommand
+        // also clears the startForeground obligation, so no crash) and return
+        // NOT_STICKY (no revival spin against sealed storage). Nothing is
+        // logged (INV-1). The app layer retries on ACTION_USER_UNLOCKED (4b-3).
+        val userManager = getSystemService(UserManager::class.java)
+        if (userManager != null && !userManager.isUserUnlocked) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         ensureChannel()
         startForeground(
             NOTIFICATION_ID,

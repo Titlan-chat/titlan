@@ -48,9 +48,19 @@ object SyncController {
      * Invoked by [SyncService] once it is in the foreground: begins the core
      * sync engine wired to the [SyncEvents] captured by [start]. Kept off the
      * Intent because [SyncEvents] is a live callback, not Parcelable.
+     *
+     * C2-D1: on a START_STICKY revival this is a FRESH process — no [start]
+     * ran, so [pendingEvents] is null — yet the §7 notification is already up
+     * and must not claim sync that is not running. Sync therefore RESUMES with
+     * [DefaultSyncEvents]: core start is idempotent and rehydrates wholly from
+     * SQLCipher, and core acks the relay only after durable persist (frozen
+     * §1), so delivery stays correct with no live observer. UI observers
+     * replace the sink whenever [start] next runs (core callback registration
+     * is engine-global and replaced on each start).
      */
     internal fun onServiceForegrounded() {
-        pendingEvents?.let { AppCore.get().startSync(it) }
+        AppCore.get().startSync(pendingEvents ?: DefaultSyncEvents)
+        running.set(true)
     }
 
     /** Stops all sync tasks and tears the foreground service down. */
@@ -63,4 +73,29 @@ object SyncController {
 
     /** True while the foreground [SyncService] is running. */
     fun isRunning(context: Context): Boolean = running.get()
+}
+
+/**
+ * Sink for sync resumed WITHOUT a UI observer (START_STICKY revival in a
+ * fresh process — C2-D1). Deliberately inert, and that is safe by frozen §1:
+ * core acks the relay only after durable persist, so no message depends on an
+ * observer being attached; the UI reads the store when it next opens, and its
+ * live observers replace this sink via [SyncController.start]. This is a
+ * delivery-continuity sink, not a UI decision — 4b-3 owns what the UI does
+ * with events.
+ */
+private object DefaultSyncEvents : SyncEvents {
+    override fun onMessageArrived(conversationId: ByteArray, messageId: ByteArray) = Unit
+
+    override fun onConnectionState(
+        conversationId: ByteArray,
+        relayEndpoint: String,
+        state: ConnectionState,
+    ) = Unit
+
+    override fun onConversationNeedsRepair(conversationId: ByteArray) = Unit
+
+    override fun onPermanentSendFailure(conversationId: ByteArray, messageId: ByteArray) = Unit
+
+    override fun onStorageError(detail: String) = Unit
 }
