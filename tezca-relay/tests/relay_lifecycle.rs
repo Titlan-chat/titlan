@@ -257,10 +257,27 @@ fn memory_stays_flat_under_sustained_load() {
     }
     let steady = settled_rss(&relay);
 
+    // OBSERVABILITY ONLY (no behavior change): sample the relay child's RSS at
+    // the END of each sustained cycle so the trajectory is visible — a rising
+    // line across the 20 samples is a leak; a step-then-flat plateau is the
+    // allocator's high-water mark. This is a plain /proc read (rss_kb) and does
+    // NOT alter the message counts, the settled_rss snapshots, or the assertion.
+    let mut series_kb: Vec<u64> = Vec::with_capacity(20);
     for _ in 0..20 {
         cycle(500); // 10,000 more sustained deposit/deliver/ack cycles
+        series_kb.push(relay.rss_kb());
     }
     let after = settled_rss(&relay);
+
+    // Unconditional magnitudes (pass AND fail). libtest captures stdout unless
+    // the run passes `--nocapture`; on a failing run the assert dumps captured
+    // stdout anyway, so these lines are always available where the outcome is.
+    let delta_kb = after as i64 - steady as i64;
+    let growth_pct = delta_kb as f64 / steady as f64 * 100.0;
+    println!(
+        "MEMFLAT steady_kb={steady} after_kb={after} delta_kb={delta_kb} growth_pct={growth_pct:.2}"
+    );
+    println!("MEMFLAT sustained_series_kb={series_kb:?}");
 
     assert!(
         after <= steady + steady / 10,

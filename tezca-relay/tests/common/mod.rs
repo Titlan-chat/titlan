@@ -123,6 +123,14 @@ pub fn spawn_relay_at(port: u16, extra: &[&str], cwd: &std::path::Path) -> Relay
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
+    // Diagnostic lever (default OFF — CI behavior unchanged): when the test
+    // process has TEZCA_MEMFLAT_ARENA_MAX set in its environment, cap the relay
+    // child's glibc arena count so per-CPU arenas don't amplify RSS high-water.
+    // Enable with `TEZCA_MEMFLAT_ARENA_MAX=1 cargo test ...`. Not product code —
+    // this only affects children spawned by the test harness.
+    if std::env::var_os("TEZCA_MEMFLAT_ARENA_MAX").is_some() {
+        cmd.env("MALLOC_ARENA_MAX", "2");
+    }
     let child = cmd.spawn().expect("spawn tezca-relay binary");
     let mut proc = RelayProc {
         child: Some(child),
