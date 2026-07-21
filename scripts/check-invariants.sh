@@ -185,9 +185,81 @@ if [ "$scanned_debug" -eq 0 ] || [ "$scanned_release" -eq 0 ]; then
   echo "note: 5e artifact scan skipped (debug=$scanned_debug release=$scanned_release — .so not built in this run)"
 fi
 
+# --- 6. Debug delivery sentinel — exists, fixed-literal, debug-gated (§9d) ----
+# Checklist (f) t1 marker (maintainer-ratified F1): ONE debug-only logcat line
+# in CoreClient.kt at the ack-after-persist delivery point. Hygiene is proven
+# statically: the emission's arguments are exactly the two pinned constants,
+# both pure literals with no identifier-shaped content (no digits, no format
+# specifier, no interpolation), and no other logcat call exists in the file.
+# scripts/device-doze-latency.sh waits on the same literals for t1, so the
+# dual-sourced pair is asserted equal here.
+core_client="titlan-android/app/src/main/kotlin/app/titlan/core/CoreClient.kt"
+doze_script="scripts/device-doze-latency.sh"
+sentinel_tag='TitlanDelivery'
+sentinel_text='chat delivery persisted'
+if ! grep -qF "DELIVERY_SENTINEL_TAG = \"$sentinel_tag\"" "$core_client"; then
+  echo "delivery sentinel: DELIVERY_SENTINEL_TAG literal missing/changed in $core_client"
+  fail=1
+fi
+if ! grep -qF "DELIVERY_SENTINEL_TEXT = \"$sentinel_text\"" "$core_client"; then
+  echo "delivery sentinel: DELIVERY_SENTINEL_TEXT literal missing/changed in $core_client"
+  fail=1
+fi
+sentinel_call='if (BuildConfig.DEBUG) Log.i(DELIVERY_SENTINEL_TAG, DELIVERY_SENTINEL_TEXT)'
+if ! grep -qF "$sentinel_call" "$core_client"; then
+  echo "delivery sentinel: debug-gated fixed-literal emission missing from $core_client"
+  fail=1
+fi
+stray_logs=$(grep -n 'Log\.' "$core_client" | grep -vF "$sentinel_call" \
+  | grep -vF 'import android.util.Log' || true)
+if [ -n "$stray_logs" ]; then
+  echo "delivery sentinel: CoreClient.kt logs beyond the single pinned sentinel line:"
+  echo "$stray_logs"
+  fail=1
+fi
+case "${sentinel_tag}${sentinel_text}" in
+  *[0-9\$%\{]*)
+    echo "delivery sentinel: pinned literals must stay identifier-free (no digits/format/interpolation)"
+    fail=1 ;;
+esac
+if ! grep -qF "$sentinel_tag" "$doze_script" || ! grep -qF "$sentinel_text" "$doze_script"; then
+  echo "delivery sentinel: $doze_script does not wait on the pinned tag+text (t1 leg unwired)"
+  fail=1
+fi
+
+# --- 7. Debug-only RELAY_URL override; release BuildConfig untouched ----------
+# Checklist (f) points the DEBUG build at a LAN relay
+# (-PtitlanDebugRelayUrl=wss://<host>:<port>, maintainer-ratified F3); the
+# release BuildConfig must remain exactly the RFC 2606 placeholder with no
+# property read anywhere near it. Positive control first: if the debug block
+# stops reading the property (rename/refactor), this check must fail loudly
+# rather than pass vacuously.
+bt_debug=$(awk '/^        debug \{/{f=1} f{print} f&&/^        \}/{exit}' "$gradle_build")
+bt_release=$(awk '/^        release \{/{f=1} f{print} f&&/^        \}/{exit}' "$gradle_build")
+if [ -z "$bt_release" ]; then
+  echo "release buildType block not found in ${gradle_build} (check 7 cannot verify release)"
+  fail=1
+fi
+if ! printf '%s' "$bt_debug" | grep -qF 'titlanDebugRelayUrl'; then
+  echo "positive control failed: debug buildType does not read titlanDebugRelayUrl (check 7 is blind)"
+  fail=1
+fi
+if ! printf '%s' "$bt_debug" | grep -qF 'wss://10.0.2.2:8443'; then
+  echo "debug RELAY_URL fallback changed: emulator default wss://10.0.2.2:8443 must remain"
+  fail=1
+fi
+if printf '%s' "$bt_release" | grep -qE 'RELAY_URL|titlanDebugRelayUrl'; then
+  echo "release buildType touches RELAY_URL / titlanDebugRelayUrl — release BuildConfig must stay untouched"
+  fail=1
+fi
+if ! grep -qF 'buildConfigField("String", "RELAY_URL", "\"wss://relay.invalid\"")' "$gradle_build"; then
+  echo "defaultConfig RELAY_URL is no longer the literal release placeholder (wss://relay.invalid)"
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors)."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override)."
