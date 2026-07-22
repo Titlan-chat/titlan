@@ -45,6 +45,19 @@ object SyncController {
     }
 
     /**
+     * Launch-time start (4b2-WO-launch-sync): starts receive-sync with no UI
+     * observer, resuming with the inert [DefaultSyncEvents] sink. In 4b-2 the UI
+     * is [app.titlan.pairing.PairingScreen] with no sync observer (observer
+     * wiring is 4b-3), so this is the same no-observer case as a START_STICKY
+     * revival (C2-D1) and safe for the same reason: core acks the relay only
+     * after durable persist (frozen §1), so delivery never depends on an
+     * attached observer. This is the SAME entry as the canonical [start] —
+     * identical §2 gate, identical foreground-service intent — not a parallel
+     * start mechanism.
+     */
+    fun start(context: Context) = start(context, DefaultSyncEvents)
+
+    /**
      * Invoked by [SyncService] once it is in the foreground: begins the core
      * sync engine wired to the [SyncEvents] captured by [start]. Kept off the
      * Intent because [SyncEvents] is a live callback, not Parcelable.

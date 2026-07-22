@@ -42,6 +42,24 @@ object AppCore {
         }
     }
 
+    /**
+     * True iff the encrypted store already exists on disk AND holds at least one
+     * conversation. A fresh install (no [DB_FILE]) returns false WITHOUT opening
+     * or creating anything — identity stays lazily minted at first pairing, so a
+     * never-paired app is untouched (4b2-WO-launch-sync: zero conversations =
+     * current behavior). When the file exists this opens SQLCipher via [get]
+     * (already initialized — no new identity) and reads [CoreClient.listConversations];
+     * heavy, so call off the main thread. The existence probe uses exactly the
+     * path [get] would open.
+     */
+    fun hasPairedConversation(): Boolean {
+        val ctx = requireNotNull(appContext) {
+            "AppCore.init must run first (TitlanApp.onCreate)"
+        }
+        if (!File(ctx.filesDir, DB_FILE).exists()) return false
+        return get().listConversations().isNotEmpty()
+    }
+
     private fun open(appContext: Context): CoreClient {
         val key = DbKeyManager(appContext).getOrCreateDbKey()
         try {
