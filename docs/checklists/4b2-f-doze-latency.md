@@ -17,18 +17,18 @@ proven (app not exempted, deep Doze reached) and a latency was measured and
 recorded per run. (Flagged for maintainer confirmation in the extraction
 report.)
 
-> EXECUTION BLOCKERS AT HEAD (see Flags in the extraction report and the
-> 4b2 doze-wiring report — do not improvise around them): the deposit
-> trigger (VM-side harness, step 6), the on-device delivery marker (debug
-> logcat sentinel, step 7), and a debug relay override reachable from a
-> physical Pixel (`-PtitlanDebugRelayUrl`, P2) are now wired. ONE blocker
-> remains: device-side TLS trust. The debug core's test anchor reads
-> `TEZCA_TEST_RELAY_PIN` from the app process environment, and the only
-> existing bridge (TitlanTestRunner) lives in the instrumentation harness,
-> not the installed app — a manually-launched debug build therefore cannot
-> yet trust the VM relay's self-signed certificate. Pin provisioning, and
-> the choice of pairing-offer transfer mechanic in the harness setup below,
-> are flags for maintainer decision, not checklist decisions.
+> EXECUTION STATUS AT HEAD: fully executable — no blockers remain. The
+> deposit trigger (VM-side harness, step 6), the delivery marker (debug
+> logcat sentinel, step 7), the debug relay override
+> (`-PtitlanDebugRelayUrl`, P2), and device-side TLS trust (debug-only pin
+> bridge, P2b: `adb shell setprop debug.titlan.relay-pin …`, exported by
+> TitlanApp.onCreate to the core's test anchor before any core touch —
+> maintainer-ratified FLAG-A option a) are all wired. The pairing-offer
+> transfer mechanic is ratified as HARNESS-AS-OFFERER with the QR rendered
+> on the VM screen (FLAG-B); device-as-offerer stays documented below as a
+> non-designated alternative. A sentinel TIMEOUT is a pre-ratified valid
+> recorded outcome (FLAG-C deferred): record it and file the evidence —
+> do not adjust the Doze recipe mid-run.
 
 ## Preconditions
 
@@ -37,16 +37,16 @@ report.)
 | P0 | Derive the applicationId into `$APP_ID` (single-sourced in `gradle.properties` per work-order §10.4 — never write the literal string; run this in the shell that runs every command below, from the repo root) | `APP_ID=$(grep -oP '^TITLAN_APPLICATION_ID=\K.*' titlan-android/gradle.properties)` |
 | P1 | Physical GrapheneOS Pixel, USB debugging enabled, visible to adb | `adb devices`; add `-s <serial>` everywhere if multiple devices |
 | P2 | Build + install the debug APK, pointed at the VM relay's LAN address | `cd titlan-android && ./gradlew :app:assembleDebug -PtitlanDebugRelayUrl=wss://<LAN-IP>:8443`, then `adb install -r titlan-android/app/build/outputs/apk/debug/app-debug.apk` (variant choice flagged — release is unsigned) |
-| P3 | A paired conversation with the VM-side deposit harness, via the VM relay | See "VM-side harness setup (P3)" below — exact commands; device-side TLS pin provisioning still flagged (banner) |
+| P2b | Provision the relay TLS pin on the device — must run BEFORE the app launch in P4, and AGAIN after any device reboot (`setprop` does not survive reboot) | `adb shell setprop debug.titlan.relay-pin $(cat relay-certs/pin.hex)` — pin from the harness setup below; the debug build's TitlanApp.onCreate exports it to the core's test anchor before any core touch |
+| P3 | A paired conversation with the VM-side deposit harness, via the VM relay | See "VM-side harness setup (P3)" below — exact commands |
 | P4 | Sync running: the app has been opened post-unlock and the persistent "Titlan sync active" notification is present | launch the app once |
 | P5 | App is NOT battery-optimization-whitelisted (the no-exemption posture) | verified in step 1; if whitelisted, remove it before proceeding |
 | P6 | Evidence directory | `mkdir -p device-evidence/doze-latency`; create `device-evidence/doze-latency/latencies.csv` with header `run,deep_state,latency_ms` |
 
 ## VM-side harness setup (P3)
 
-All commands run on the build host ("VM") from the repo root. The relay and
-harness sides are exact and executable now; the DEVICE side stays blocked on
-the TLS-pin flag in the banner until the maintainer resolves provisioning.
+All commands run on the build host ("VM") from the repo root; the device
+side is covered by P2/P2b.
 
 1. Generate the relay TLS certificate + client pin (the pin verifier hashes
    the leaf DER and ignores SAN names, so the stock generator serves any LAN
@@ -58,23 +58,29 @@ the TLS-pin flag in the banner until the maintainer resolves provisioning.
    ./target/release/tezca-relay --tls-cert relay-certs/cert.pem \
      --tls-key relay-certs/key.pem --listen 0.0.0.0:8443
    ```
-3. Build + install the debug APK per P2 (same `<LAN-IP>`).
-4. Pair the harness with the device — either direction works; the transfer
-   mechanic is flagged for the maintainer to pick:
-   - **Harness as offerer**:
-     ```
-     TEZCA_TEST_RELAY_PIN=$(cat relay-certs/pin.hex) \
-       cargo run -p tezca-core --locked --features test-relay-anchor \
-       --example deposit_harness -- offer --dir ~/titlan-harness \
-       --relay wss://<LAN-IP>:8443
-     ```
-     then render the printed `titlan://pair#` link as a QR on the VM screen
-     (e.g. `qrencode -t ansiutf8 '<link>'`) and scan it with the device's
-     pairing screen.
-   - **Device as offerer**: show the offer on the device, transfer the
-     on-screen `titlan://pair#` link text to the VM, then run the same
-     command with `respond --dir ~/titlan-harness --relay
-     wss://<LAN-IP>:8443 --offer 'titlan://pair#…'` in place of `offer …`.
+3. Build + install the debug APK per P2 (same `<LAN-IP>`), set the device
+   pin per P2b.
+4. Pre-build the harness example so the deposit command (main steps,
+   step 6) starts instantly — t0 (main steps, step 5) precedes harness
+   startup, so an unbuilt harness (cargo compiling at deposit time)
+   inflates the measured latency:
+   `cargo build -p tezca-core --locked --features test-relay-anchor --example deposit_harness`
+5. Pair the harness with the device. **Designated path (ratified FLAG-B):
+   harness as offerer, QR rendered on the VM screen.**
+   ```
+   TEZCA_TEST_RELAY_PIN=$(cat relay-certs/pin.hex) \
+     cargo run -p tezca-core --locked --features test-relay-anchor \
+     --example deposit_harness -- offer --dir ~/titlan-harness \
+     --relay wss://<LAN-IP>:8443
+   ```
+   then render the printed `titlan://pair#` link as a QR on the VM screen
+   with `qrencode -t ansiutf8 '<link>'` and scan it with the device's
+   pairing screen.
+   (Non-designated alternative, documented only: device as offerer — show
+   the offer on the device, transfer the on-screen `titlan://pair#` link
+   text to the VM, then run the same command with `respond --dir
+   ~/titlan-harness --relay wss://<LAN-IP>:8443 --offer 'titlan://pair#…'`
+   in place of `offer …`.)
 
    EXPECTED: the harness prints `paired: conversation <hex>`; its session
    state persists in `--dir` for every later `send` (step 6).
