@@ -257,6 +257,58 @@ if ! grep -qF 'buildConfigField("String", "RELAY_URL", "\"wss://relay.invalid\""
   fail=1
 fi
 
+# --- 8. Debug TLS pin bridge — exists, gated, ordered, single-sourced ---------
+# Checklist (f) device-side TLS trust (maintainer-ratified FLAG-A option a):
+# TitlanApp.onCreate exports the debug.titlan.relay-pin system property into
+# TEZCA_TEST_RELAY_PIN BEFORE any core touch, debug builds only. Pinned like
+# §6: exact literal shapes, single-file single-sourcing across src/main, and
+# ordering asserted statically by line order — onCreate is a single linear
+# body, so "the gate line's number precedes the first AppCore reference's
+# line number" IS the execution order.
+titlan_app="titlan-android/app/src/main/kotlin/app/titlan/TitlanApp.kt"
+app_main="titlan-android/app/src/main"
+pin_prop='debug.titlan.relay-pin'
+pin_env='TEZCA_TEST_RELAY_PIN'
+bridge_gate='if (BuildConfig.DEBUG) exportDebugRelayPin()'
+# 8a. Single-sourced literals: the property name lives in ONE pinned const,
+#     the env var name in ONE pinned Os.setenv call.
+if ! grep -qF "DEBUG_RELAY_PIN_PROP = \"$pin_prop\"" "$titlan_app"; then
+  echo "pin bridge: DEBUG_RELAY_PIN_PROP literal missing/changed in $titlan_app"
+  fail=1
+fi
+if ! grep -qF "Os.setenv(\"$pin_env\", pin, true)" "$titlan_app"; then
+  echo "pin bridge: Os.setenv(\"$pin_env\", ...) call missing/changed in $titlan_app"
+  fail=1
+fi
+# 8b. The bridge is a single debug-gated statement.
+if ! grep -qF "$bridge_gate" "$titlan_app"; then
+  echo "pin bridge: debug-gated bridge statement missing from $titlan_app"
+  fail=1
+fi
+# 8c. Ordering: the gate precedes any core initialization in onCreate.
+gate_line=$(grep -nF "$bridge_gate" "$titlan_app" | head -n 1 | cut -d: -f1 || true)
+core_line=$(grep -nF 'AppCore.init' "$titlan_app" | head -n 1 | cut -d: -f1 || true)
+if [ -z "$gate_line" ] || [ -z "$core_line" ] || [ "$gate_line" -ge "$core_line" ]; then
+  echo "pin bridge: bridge statement does not precede AppCore.init in $titlan_app (gate=$gate_line core=$core_line)"
+  fail=1
+fi
+# 8d. Exactly one reader of the property and one setter of the env var in the
+#     app (src/main) — TitlanApp.kt itself. (TitlanTestRunner in the
+#     androidTest harness sets the same env var by design: it is the
+#     instrumentation-side bridge and is never packaged in the app APK.)
+prop_files=$(grep -rlF "$pin_prop" "$app_main" || true)
+env_files=$(grep -rlF "$pin_env" "$app_main" || true)
+if [ "$prop_files" != "$titlan_app" ]; then
+  echo "pin bridge: $pin_prop must be read by exactly $titlan_app; found:"
+  echo "${prop_files:-<nowhere>}"
+  fail=1
+fi
+if [ "$env_files" != "$titlan_app" ]; then
+  echo "pin bridge: $pin_env must be set by exactly $titlan_app (src/main); found:"
+  echo "${env_files:-<nowhere>}"
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
