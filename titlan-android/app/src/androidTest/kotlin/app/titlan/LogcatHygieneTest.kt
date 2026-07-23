@@ -27,15 +27,24 @@ class LogcatHygieneTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
 
+    // This suite's OWN store — never the shared AppCore filesDir/titlan.db.
+    // AppCore keeps one process-wide connection to that file open for the whole
+    // run; unlinking it under the live connection triggers
+    // SQLITE_READONLY_DBMOVED on the next write through it (CI #64–#66;
+    // ~/4b2-readonly-invest.md).
+    private val dbFile = File(context.cacheDir, "logcat-hygiene.db")
+
     @Before
     fun freshState() {
-        // Reset DB and key state COHERENTLY (run 29613625849: deleting only
-        // the key blob left a stale SQLCipher DB encrypted under the old
-        // key — cross-test pollution, "database key rejected" at open).
-        for (name in listOf(
-            "titlan.db", "titlan.db-journal", "titlan.db-wal", "titlan.db-shm",
-            DbKeyManager.WRAP_FILE, "${DbKeyManager.WRAP_FILE}.tmp",
-        )) {
+        // Reset this suite's OWN store + key state coherently for a fresh
+        // birth/wrap/unwrap/open lifecycle: the own store is deleted so a fresh
+        // Keystore wrapping key can open it without a stale-key mismatch (the
+        // original cross-test pollution guarantee, run 29613625849), while the
+        // shared titlan.db is left untouched.
+        for (suffix in listOf("", "-journal", "-wal", "-shm")) {
+            File("${dbFile.path}$suffix").delete()
+        }
+        for (name in listOf(DbKeyManager.WRAP_FILE, "${DbKeyManager.WRAP_FILE}.tmp")) {
             File(context.filesDir, name).delete()
         }
     }
@@ -57,7 +66,7 @@ class LogcatHygieneTest {
         val key = DbKeyManager(context).getOrCreateDbKey()
         DbKeyManager(context).getOrCreateDbKey()
         CoreClientFactory.open(
-            File(context.filesDir, "titlan.db").path,
+            dbFile.path,
             key,
             "wss://relay.invalid",
         ).use { it.initializeIdentity() }

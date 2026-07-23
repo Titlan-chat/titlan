@@ -23,6 +23,20 @@ object AppCore {
     @Volatile
     private var appContext: Context? = null
 
+    /**
+     * The single process-wide opened core, cached for the process lifetime and
+     * never re-opened (see [get]).
+     *
+     * CONTRACT: the backing SQLCipher file (`filesDir/`[DB_FILE]) must NEVER be
+     * deleted or replaced while the process is alive. Unlinking it out from
+     * under this open connection makes the next WRITE through it fail
+     * `SQLITE_READONLY_DBMOVED` ("attempt to write a readonly database"), while
+     * READS still return stale data from the open inode — so the fault can hide
+     * behind reads until a write hits it (CI #64/#65 read-masked it as "Query
+     * returned no rows"; the per-offer-prekey INSERT surfaced it in #66; see
+     * `~/4b2-readonly-invest.md`). Instrumented tests that need a fresh store
+     * MUST use their own DB paths and leave `filesDir/`[DB_FILE] alone.
+     */
     @Volatile
     private var client: CoreClient? = null
 
