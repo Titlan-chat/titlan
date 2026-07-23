@@ -35,7 +35,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/mailboxes/{id}/messages",
             post(deposit).layer(DefaultBodyLimit::max(max_blob)),
         )
-        .route("/v1/mailboxes/{id}", axum::routing::delete(delete_mailbox))
+        .route(
+            "/v1/mailboxes/{id}",
+            axum::routing::delete(delete_mailbox).put(put_mailbox),
+        )
         .route("/v1/mailboxes/{id}/ws", get(subscribe))
         .with_state(state)
 }
@@ -124,6 +127,35 @@ async fn deposit(
         let _ = notify.send(());
     }
     StatusCode::ACCEPTED.into_response()
+}
+
+/// `PUT /v1/mailboxes/{id}` — idempotent create-at-client-specified-256-bit-id
+/// (frozen §8, for §10.7 derived-recovery mailboxes). The response is
+/// BYTE-IDENTICAL whether the mailbox was created or already existed (no
+/// existence oracle, DELETE precedent); at the global cap it returns the
+/// uniform capacity error regardless of existence. Per-source rate limit
+/// (30/min default); NO per-mailbox limit (the id is caller-chosen and may not
+/// exist yet). Counts against the global mailbox cap identically to POST.
+async fn put_mailbox(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+) -> Response {
+    // A malformed id is not a 256-bit mailbox id; reject on shape alone (no
+    // server state consulted, so this leaks no existence information).
+    if !wire::mailbox_id_shape_ok(&id) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if !state.src_limiter.admit_put(addr.ip()) {
+        return too_many_requests();
+    }
+    if state.put_mailbox(&id) {
+        // 201 + empty body for BOTH created and already-existing — identical.
+        StatusCode::CREATED.into_response()
+    } else {
+        // Uniform capacity error at cap, regardless of id existence.
+        StatusCode::SERVICE_UNAVAILABLE.into_response()
+    }
 }
 
 async fn delete_mailbox(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {

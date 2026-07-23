@@ -23,6 +23,8 @@ pub struct Config {
     pub mailbox_max_bytes: usize,
     pub max_mailboxes: usize,
     pub rate_create_per_min: u32,
+    /// Per-source `PUT /v1/mailboxes/{id}` create-at-id rate (frozen §8).
+    pub rate_put_per_min_source: u32,
     pub rate_deposit_per_min_source: u32,
     pub rate_deposit_per_min_mailbox: u32,
     pub rate_ws_per_min_mailbox: u32,
@@ -46,6 +48,7 @@ impl Default for Config {
             mailbox_max_bytes: 4 * 1024 * 1024,
             max_mailboxes: 100_000,
             rate_create_per_min: 10,
+            rate_put_per_min_source: 30,
             rate_deposit_per_min_source: 60,
             rate_deposit_per_min_mailbox: 120,
             rate_ws_per_min_mailbox: 6,
@@ -98,6 +101,10 @@ impl Config {
                 "--rate-create-per-min" => {
                     cfg.rate_create_per_min =
                         parse_num(&flag, &value("--rate-create-per-min")?)? as u32
+                }
+                "--rate-put-per-min-source" => {
+                    cfg.rate_put_per_min_source =
+                        parse_num(&flag, &value("--rate-put-per-min-source")?)? as u32
                 }
                 "--rate-deposit-per-min-source" => {
                     cfg.rate_deposit_per_min_source =

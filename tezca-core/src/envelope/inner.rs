@@ -33,10 +33,13 @@ pub enum PayloadType {
     Policy = 0x03,
     /// Appliance alert (Tezca suite; reserved, first-class).
     Alert = 0x04,
-    /// Pairing control: scanner's reply coordinates (`pair-ack/1`).
+    /// Pairing control: scanner's reply coordinates (`pair-ack/1`, `pair-ack/2`).
     PairAck = 0x05,
-    /// Pairing control: one-sided inbox recovery (`mailbox-update/1`).
+    /// Pairing/recovery control: inbox rotation / handoff (`mailbox-update/1`,
+    /// `mailbox-update/2` inbox-handoff, `mailbox-update/3` rotation).
     MailboxUpdate = 0x06,
+    /// §10.7 recovery probe (`recovery-hello`), maintainer-ratified 2026-07-19.
+    RecoveryHello = 0x07,
 }
 
 /// A typed, versioned payload frame (pre-padding representation).
@@ -145,6 +148,7 @@ impl TryFrom<u8> for PayloadType {
             0x04 => Ok(PayloadType::Alert),
             0x05 => Ok(PayloadType::PairAck),
             0x06 => Ok(PayloadType::MailboxUpdate),
+            0x07 => Ok(PayloadType::RecoveryHello),
             got => Err(CoreError::UnknownPayloadType { got }),
         }
     }

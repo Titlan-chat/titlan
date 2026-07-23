@@ -45,7 +45,7 @@ jobs:
       - run: cargo test --workspace --locked
       # The flat-memory acceptance test (§6 Phase 3) is RSS-sensitive and is
       # #[ignore]d in the concurrent run above; run it alone, single-threaded.
-      - run: cargo test -p tezca-relay --test relay_lifecycle --locked memory_stays_flat_under_sustained_load -- --ignored --exact --test-threads=1
+      - run: cargo test -p tezca-relay --test relay_lifecycle --locked memory_stays_flat_under_sustained_load -- --ignored --exact --test-threads=1 --nocapture
 
   rust-supply-chain:
     name: Rust — cargo deny + audit (INV-6/INV-7)
@@ -159,7 +159,13 @@ jobs:
           tool: cargo-ndk
       - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
         working-directory: .
-      - run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+      # assembleRelease is built here too so the 5e artifact scan below can
+      # assert the anchor split on BOTH variants' .so (debug carries the
+      # test-anchor string, release must not).
+      - run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+      - name: Invariants incl. artifact-level anchor split (5e)
+        run: ./scripts/check-invariants.sh
+        working-directory: .
 
   android-instrumented:
     name: Android — instrumented (Keystore wrap, INV-1 at-rest)
@@ -179,6 +185,53 @@ jobs:
         with:
           tool: cargo-ndk
       - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+      # 4b-2: a real relay binary runs on the runner host so the instrumented
+      # pairing/recovery suites reach it from the emulator at 10.0.2.2 (the
+      # emulator's alias for host loopback). GREEN posture: the relay serves
+      # rcgen TLS (frozen design §9); the debug .so trusts it ONLY via the
+      # feature-gated test anchor (TEZCA_TEST_RELAY_PIN = hex SHA-256 of the
+      # leaf cert DER, set in-process by TitlanTestRunner from the
+      # instrumentation args below). Release builds carry neither the anchor
+      # code nor the env-var string (check-invariants.sh; tls_anchor_e2e is
+      # the host-side proof of both legs + the wrong-cert rejection).
+      - name: Build the CI test relay
+        run: cargo build --release -p tezca-relay --locked
+      - name: Generate the CI relay TLS certificate + client pin (rcgen)
+        run: cargo run --release -p tezca-relay --locked --example gen_test_cert -- relay-certs
+      - name: Launch the CI test relay (rcgen TLS, reached at 10.0.2.2:8443 from the emulator)
+        run: |
+          # Grant memlock like deploy/tezca-relay.service (LimitMEMLOCK=infinity):
+          # the release binary's hardening::apply() calls mlockall(CURRENT|FUTURE),
+          # and under the runner's bounded RLIMIT_MEMLOCK tokio's first
+          # worker-thread stack mapping exceeds the lock budget → EAGAIN → startup
+          # panic (run 29668894554). Raising the limit is exactly what the systemd
+          # unit does in production.
+          sudo prlimit --memlock=unlimited:unlimited --pid $$
+          echo "memlock limit: $(ulimit -l)"
+          # Test-lane rate limits, mirroring the Rust e2e harness's
+          # GENEROUS_LIMITS (tezca-relay/tests/common/mod.rs): the whole
+          # emulator is ONE source IP, and the suite performs 15 mailbox
+          # creates in under a minute — the production default of
+          # 10 creates/min/source 429'd pairing setup at creates #11/#12
+          # (run 29803163714). Production defaults are untouched; the
+          # relay's own limits/put_mailbox suites still test them.
+          nohup ./target/release/tezca-relay \
+            --tls-cert relay-certs/cert.pem --tls-key relay-certs/key.pem \
+            --listen 0.0.0.0:8443 \
+            --rate-create-per-min 100000 \
+            --rate-deposit-per-min-source 1000000 \
+            --rate-deposit-per-min-mailbox 1000000 \
+            --rate-ws-per-min-mailbox 100000 \
+            > relay.log 2>&1 &
+          for _ in $(seq 1 50); do
+            # -k: the probe only checks liveness; certificate trust is the
+            # client anchor's job (pin verification, not curl's).
+            if curl -fsSk https://127.0.0.1:8443/healthz >/dev/null 2>&1; then
+              echo "relay healthy on :8443 (tls)"; exit 0
+            fi
+            sleep 0.2
+          done
+          echo "relay did not become healthy"; echo "ulimit -l: $(ulimit -l)"; cat relay.log; exit 1
       - name: Enable KVM for the emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -191,7 +244,9 @@ jobs:
           arch: x86_64
           disable-animations: true
           working-directory: titlan-android
-          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest
+          # The pin rides the instrumentation args; TitlanTestRunner exports
+          # it as TEZCA_TEST_RELAY_PIN in the app process before any core use.
+          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.tezcaRelayPin="$(cat ../relay-certs/pin.hex)"
       # Backup posture check runs even when the instrumented suite is red
       # (if: always()) so both red signals stay visible on the same run.
       - name: Backup rules — aapt2 vs built APK (cloud + d2d excluded)

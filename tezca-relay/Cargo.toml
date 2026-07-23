@@ -36,8 +36,14 @@ futures = { workspace = true }
 
 [dev-dependencies]
 # Acceptance tests drive a real relay child process end-to-end with real
-# tezca-core clients (work order §6 Phase 3 acceptance).
-tezca-core = { path = "../tezca-core" }
+# tezca-core clients (work order §6 Phase 3 acceptance). test-relay-anchor
+# (dev-scope ONLY — examples/tests; the relay binary has no tezca-core dep)
+# lets the TLS-anchor e2e validate the exact debug-.so trust path that the
+# Android instrumented suite uses against the rcgen-served CI relay.
+tezca-core = { path = "../tezca-core", features = ["test-relay-anchor"] }
+# SHA-256 of the test cert DER (the pin value) for the TLS-anchor harness;
+# ring is INV-6-approved and already in the workspace tree via tezca-core.
+ring = { workspace = true }
 tempfile = { workspace = true }
 # WebSocket test client. sha1 comes with it: RFC 6455 requires SHA-1 in the
 # WS opening handshake — maintainer-approved wrapper in deny.toml.
