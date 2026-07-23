@@ -116,6 +116,96 @@ fn pair_v2_offer_proof_and_exchange() {
     wait_until(|| bob_rx.texts().contains(&"hi bob v2".to_string()));
 }
 
+/// Per-offer one-time prekey (4b2-WO-otpk-per-offer): a device must be able to
+/// show a pairing offer more than once per identity. Today the offer advertises
+/// the single fixed `ONETIME_PREKEY_ID`, which libsignal's `remove_pre_key`
+/// deletes when the offerer processes the responder's `pair-ack/2`; the next
+/// `export_pairing_offer` then reads that removed id via a strict `query_row`.
+///
+/// RED signature: after Alice is paired into once, her second
+/// `export_pairing_offer()` fails with `CoreError::Storage("Query returned no
+/// rows")` (Display `storage error: Query returned no rows`), thrown from
+/// `identity::export_prekey_bundle` before any relay call. GREEN: a fresh
+/// per-offer prekey makes the re-export succeed.
+#[test]
+fn offerer_can_export_again_after_being_paired_into() {
+    let dir = TempDir::new().unwrap();
+    let d = TempDir::new().unwrap();
+    let relay = spawn_relay_at(free_port(), GENEROUS_LIMITS, d.path());
+    let url = format!("ws://{}", relay.base());
+
+    let alice = new_client(&dir, "alice.db", &url); // offerer
+    let bob = new_client(&dir, "bob.db", &url); // responder
+    alice
+        .start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+
+    // First offer, fully paired: Bob's pairing returns only after Alice has
+    // handed off, i.e. after Alice processed Bob's pair-ack and libsignal
+    // removed Alice's advertised one-time prekey.
+    let offer1 = alice.export_pairing_offer().unwrap();
+    bob.begin_pairing_from_offer(offer1.as_bytes()).unwrap();
+    wait_until(|| !alice.list_conversations().unwrap().is_empty());
+
+    // The offerer must be able to mint a second offer for a different peer.
+    let again = alice.export_pairing_offer();
+    assert!(
+        again.is_ok(),
+        "re-export after an inbound pairing must succeed; got {:?}",
+        again.err(),
+    );
+}
+
+/// Second-scanner property (4b2-WO-otpk-per-offer): two live offers must be
+/// independently pairable. Today both offers advertise the SAME fixed one-time
+/// prekey, so once the first responder consumes it the offerer can no longer
+/// decrypt the second responder's `pair-ack/2`, never hands off, and the second
+/// responder times out.
+///
+/// RED signature: `bob2.begin_pairing_from_offer(offer2)` returns
+/// `CoreError::Network("pairing handoff timed out")` after the 10 s handoff
+/// deadline. GREEN: distinct per-offer prekeys let both pairings complete.
+#[test]
+fn two_live_offers_are_each_independently_pairable() {
+    let dir = TempDir::new().unwrap();
+    let d = TempDir::new().unwrap();
+    let relay = spawn_relay_at(free_port(), GENEROUS_LIMITS, d.path());
+    let url = format!("ws://{}", relay.base());
+
+    let alice = new_client(&dir, "alice.db", &url); // offerer
+    let bob1 = new_client(&dir, "bob1.db", &url); // first scanner
+    let bob2 = new_client(&dir, "bob2.db", &url); // second scanner
+    let alice_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob1.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+    bob2.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+
+    // Two offers live at the same time.
+    let offer1 = alice.export_pairing_offer().unwrap();
+    let offer2 = alice.export_pairing_offer().unwrap();
+
+    // First scanner pairs (this returns only after Alice consumed offer1's
+    // prekey and handed off). The second scanner must still be able to pair.
+    let conv_b1 = bob1.begin_pairing_from_offer(offer1.as_bytes()).unwrap();
+    let conv_b2 = bob2
+        .begin_pairing_from_offer(offer2.as_bytes())
+        .expect("second live offer must be independently pairable");
+
+    // Both conversations live end to end.
+    bob1.send_chat(&conv_b1, "from bob1").unwrap();
+    bob2.send_chat(&conv_b2, "from bob2").unwrap();
+    wait_until(|| {
+        let t = alice_rx.texts();
+        t.contains(&"from bob1".to_string()) && t.contains(&"from bob2".to_string())
+    });
+}
+
 /// v2 §10.7 single total loss: a shared relay restart kills BOTH inboxes at
 /// once. A v2 conversation (recovery root established at pairing) recovers via
 /// DERIVED mailboxes — both sides bump generation, PUT-create + route through
