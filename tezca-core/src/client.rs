@@ -152,7 +152,7 @@ impl TitlanClient {
     /// listener that verifies proof-of-scan on the responder's `pair-ack/2` and
     /// hands off this side's long-lived inbox + recovery contribution.
     pub fn export_pairing_offer(&self) -> Result<PairingPayload> {
-        let bundle = crate::identity::export_prekey_bundle(&self.store)?;
+        let bundle = crate::identity::export_offer_bundle(&self.store)?;
         let payload = shared_runtime().block_on(self.engine.export_offer(&bundle))?;
         Ok(PairingPayload::from_bytes(payload))
     }

@@ -156,9 +156,11 @@ pub fn local_address(store: &Store) -> Result<String> {
     .map_err(sql_err)
 }
 
-/// Exports the serialized pre-key bundle carried by the pairing QR / link
-/// (A7). Format: `proto/pairing.md`.
-pub fn export_prekey_bundle(store: &Store) -> Result<Vec<u8>> {
+/// Serializes a pairing bundle (`proto/pairing.md`, A7) advertising the
+/// long-lived identity/signed/kyber material plus the given one-time prekey
+/// `(id, public)`. Shared by the offer path ([export_offer_bundle]) and the
+/// responder `pair-ack/2` path ([export_prekey_bundle]).
+fn serialize_bundle(store: &Store, onetime: (u32, Vec<u8>)) -> Result<Vec<u8>> {
     let address_name = local_address(store)?;
     let (registration_id, identity_bytes) = {
         let conn = store.conn.lock().expect("store mutex poisoned");
@@ -186,11 +188,6 @@ pub fn export_prekey_bundle(store: &Store) -> Result<Vec<u8>> {
         KYBER_PREKEY_ID,
     )?)
     .map_err(signal_err)?;
-    let onetime_record = PreKeyRecord::deserialize(&read_record(
-        "SELECT record FROM prekeys WHERE id = ?1",
-        ONETIME_PREKEY_ID,
-    )?)
-    .map_err(signal_err)?;
 
     let data = BundleData {
         address_name,
@@ -211,14 +208,83 @@ pub fn export_prekey_bundle(store: &Store) -> Result<Vec<u8>> {
             .serialize()
             .to_vec(),
         kyber_prekey_sig: kyber_record.signature().map_err(signal_err)?,
-        onetime_prekey: Some((
-            ONETIME_PREKEY_ID,
-            onetime_record
-                .public_key()
-                .map_err(signal_err)?
-                .serialize()
-                .to_vec(),
-        )),
+        onetime_prekey: Some(onetime),
     };
     Ok(pairing::serialize(&data))
+}
+
+/// Exports the bundle for a responder's `pair-ack/2` (A7). It advertises the
+/// fixed init one-time prekey [ONETIME_PREKEY_ID]: the offerer never runs PQXDH
+/// against the responder's bundle (it ratchets its inbox-handoff on the session
+/// the responder's `pair-ack/2` already established), so this prekey is never
+/// consumed and is safely reused across pair-acks.
+pub fn export_prekey_bundle(store: &Store) -> Result<Vec<u8>> {
+    let onetime_public = {
+        let conn = store.conn.lock().expect("store mutex poisoned");
+        let record: Vec<u8> = conn
+            .query_row(
+                "SELECT record FROM prekeys WHERE id = ?1",
+                [ONETIME_PREKEY_ID],
+                |row| row.get(0),
+            )
+            .map_err(sql_err)?;
+        PreKeyRecord::deserialize(&record)
+            .map_err(signal_err)?
+            .public_key()
+            .map_err(signal_err)?
+            .serialize()
+            .to_vec()
+    };
+    serialize_bundle(store, (ONETIME_PREKEY_ID, onetime_public))
+}
+
+/// Exports the bundle carried by a pairing OFFER (A7; `proto/pairing.md`).
+/// Unlike the responder path, each offer mints and persists a FRESH one-time
+/// prekey with a unique id, so it advertises its own prekey: when the offerer
+/// later processes a responder's `pair-ack/2`, libsignal's `remove_pre_key`
+/// deletes exactly that offer's prekey, leaving every other live offer — and
+/// every future offer — its own. Without this the single fixed
+/// [ONETIME_PREKEY_ID] is deleted on the first inbound pairing and a device can
+/// be paired into only once per identity.
+pub fn export_offer_bundle(store: &Store) -> Result<Vec<u8>> {
+    let onetime = mint_offer_onetime_prekey(store)?;
+    serialize_bundle(store, onetime)
+}
+
+/// Mints a fresh one-time prekey for a single offer through the same libsignal
+/// types and `prekeys` insert path [initialize] uses (INV-6 — only the id
+/// allocation and lifecycle differ), returning `(id, public-key bytes)`.
+///
+/// Id allocation is monotonic (`MAX(id) + 1`), never colliding with the fixed
+/// responder key at id 1 nor with any still-unconsumed offer prekey — a random
+/// id could hit an existing row and `ON CONFLICT`-overwrite a live offer's
+/// secret. The `MAX(id)` read and the `INSERT` run under a single store-mutex
+/// acquisition, so two concurrent offers observe distinct ids.
+fn mint_offer_onetime_prekey(store: &Store) -> Result<(u32, Vec<u8>)> {
+    let mut rng = rand::rngs::OsRng.unwrap_err();
+    let keypair = KeyPair::generate(&mut rng);
+    let conn = store.conn.lock().expect("store mutex poisoned");
+    let id: u32 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) + 1 FROM prekeys", [], |row| {
+            row.get(0)
+        })
+        .map_err(sql_err)?;
+    // u32::MAX is the wire's ABSENT_ID sentinel (pairing.rs); unreachable in any
+    // real device lifetime (it needs ~4 billion prekey rows) — rejected rather
+    // than silently advertised as "no prekey".
+    if id == u32::MAX {
+        return Err(CoreError::Storage(
+            "one-time prekey id space exhausted".into(),
+        ));
+    }
+    let record = PreKeyRecord::new(id.into(), &keypair);
+    conn.execute(
+        "INSERT INTO prekeys (id, record) VALUES (?1, ?2)",
+        rusqlite::params![id, record.serialize().map_err(signal_err)?],
+    )
+    .map_err(sql_err)?;
+    record
+        .public_key()
+        .map_err(signal_err)
+        .map(|k| (id, k.serialize().to_vec()))
 }
