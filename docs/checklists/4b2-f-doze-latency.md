@@ -58,10 +58,33 @@ report.)
 | P5 | App is NOT battery-optimization-whitelisted (the no-exemption posture) | verified in step 1; if whitelisted, remove it before proceeding |
 | P6 | Evidence directory | `mkdir -p device-evidence/doze-latency`; create `device-evidence/doze-latency/latencies.csv` with header `run,deep_state,latency_ms` |
 
+> P4 CAVEAT — "sync active" ≠ reachable. The persistent "Titlan sync active"
+> notification proves the FGS receive loop is running, NOT that the device's
+> inbox still exists on the relay. If the relay was restarted after pairing
+> (mailboxes are RAM-only, INV-3), the device's loop detects the loss and
+> recovers ONE-SIDEDLY onto a derived inbox that the one-shot deposit harness —
+> which runs no receive loop — never discovers, so deposits never arrive despite
+> the notification. Reachability is guaranteed only by the RELAY-LIFETIME
+> precondition in the P3 setup below (same relay process since pairing, or
+> re-pair fresh). Analysis of record: `~/4b2-recovery-topology.md`.
+
 ## VM-side harness setup (P3)
 
 All commands run on the build host ("VM") from the repo root; the device
 side is covered by P2/P2b.
+
+> RELAY-LIFETIME PRECONDITION — the relay process launched in step 2 must remain
+> the SAME process from pairing (step 5) through every measurement run. Relay
+> mailboxes are RAM-only (INV-3): a relay restart drops all mailboxes, and the
+> one-shot deposit harness runs no receive loop, so it cannot participate in
+> §10.7 recovery to relearn the device's new inbox — the paired conversation is
+> then unrecoverable from the harness side (the device recovers one-sidedly onto
+> a derived inbox the harness never discovers; see the P4 caveat above). If the
+> relay restarts after pairing, RE-PAIR FRESH: relaunch the relay, then redo
+> step 5 with a FRESH harness `--dir` (e.g. `--dir ~/titlan-harness-2`) so
+> exactly one conversation exists in it — per-offer OTPK makes repeat offers
+> valid, and the deposit `send` (main steps, step 6) requires a single
+> conversation in the `--dir`. Analysis of record: `~/4b2-recovery-topology.md`.
 
 1. Generate the relay TLS certificate + client pin (the pin verifier hashes
    the leaf DER and ignores SAN names, so the stock generator serves any LAN
