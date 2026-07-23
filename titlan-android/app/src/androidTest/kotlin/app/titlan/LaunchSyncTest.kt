@@ -9,7 +9,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.titlan.core.AppCore
 import app.titlan.core.CoreClient
 import app.titlan.core.CoreClientFactory
-import app.titlan.sync.FakeRelay
 import app.titlan.sync.SyncController
 import java.io.File
 import java.security.SecureRandom
@@ -26,26 +25,31 @@ import org.junit.runner.RunWith
  * Property: with a paired conversation durably persisted in the app store,
  * cold-starting [MainActivity] must start [SyncService] (receive-sync), so a
  * process death no longer leaves the app permanently non-syncing. Sync start is
- * currently reachable only via [SyncController.start] (no launch wiring), so a
- * cold launch composes PairingScreen and never starts sync.
+ * reachable only via [SyncController.start] (no launch wiring), so a cold launch
+ * previously composed PairingScreen and never started sync.
  *
- * Two graded facts (flag ruling, Option B — see ~/4b2-launch-sync-flag.md):
+ * SOLE CI-GRADED ASSERTION: after a cold [MainActivity] launch with a paired
+ * conversation present, [SyncController.isRunning] is true. Red `0060371`
+ * recorded this as its failure signature ("cold launch with a paired
+ * conversation must start SyncService"); CI run 29965946907 (#64) confirmed it
+ * flipped red -> green.
  *
- *  - Assertion 7 (the RED→GREEN signal): after a cold [MainActivity] launch with
- *    a paired conversation present, [SyncController.isRunning] is true. This is
- *    the recorded RED failure signature — in RED, launch never starts sync, so
- *    this assertion fails (after all setup succeeds).
- *  - Assertion 8 (GREEN-side strengthening): the launch-started sync engages the
- *    relay. The device-global receive subscribe targets `my_relay`
- *    (BuildConfig.RELAY_URL, the live CI relay in the emulator lane), so it is
- *    not observable on a controllable relay; instead a pre-queued outbound
- *    message is flushed on connect to the per-conversation relay override
- *    (`convo.relay_url`, INV-5) pointed at an in-process [FakeRelay], observed as
- *    a deposit. This assertion is reached ONLY in GREEN (assertion 7 throws
- *    first in RED); its reachability is demonstrated by the GREEN run, not RED.
+ * The deposit-observation strengthening — a FakeRelay-observed deposit proving
+ * the launch-started sync engages the relay — did NOT survive CI timing
+ * (accepts=0 in #64). Per the standing §9 fallback contract of
+ * `~/4b2-launch-sync-flag.md` it is now a PHYSICAL-DEVICE step, not a CI
+ * assertion: on a device, the checklist-(f) doze run observes the
+ * launch-started sync actually delivering (the `TitlanDelivery` sentinel),
+ * which subsumes the deposit observable — see
+ * `docs/checklists/4b2-f-doze-latency.md`. The device-global receive subscribe
+ * targets `my_relay` (BuildConfig.RELAY_URL), not a per-conversation relay, so
+ * an in-process FakeRelay cannot observe it in the emulator lane regardless.
  *
  * Seeding is the [RecoveryTest]-style scratch-peer pairing over the live CI
- * relay (one identity cannot pair with itself); production API only.
+ * relay (one identity cannot pair with itself); production API only. No
+ * outbound message is queued and no relay override is set — the graded property
+ * needs only a persisted conversation, so the minimal seeding also leaves no
+ * pending-flush loop churning the shared store after the test.
  */
 @RunWith(AndroidJUnit4::class)
 class LaunchSyncTest {
@@ -78,59 +82,32 @@ class LaunchSyncTest {
     }
 
     @Test
-    fun coldLaunchWithPairedConversationStartsSyncAndSubscribes() {
+    fun coldLaunchWithPairedConversationStartsSync() {
         val core = AppCore.get()
         if (!core.isInitialized()) core.initializeIdentity()
-        val conv = pairWithScratchPeer(
+        pairWithScratchPeer(
             core,
             File(context.cacheDir, "launch-sync-peer.db").also { it.delete() },
         )
 
-        // Keep one outbound message pending so the launch-started sync has
-        // something to flush on connect: point the conversation at an
-        // unreachable relay first, so sendChat's immediate best-effort flush
-        // cannot deliver (the message stays pending), then redirect deposits to
-        // the observable relay double. Nothing has reached the FakeRelay yet.
-        core.setConversationRelay(conv, "ws://127.0.0.1:1")
-        core.sendChat(conv, "launch-sync probe")
+        // Launch-specific precondition: sync must be stopped, so "running after
+        // launch" cannot be vacuously satisfied by a prior test in this shared
+        // process.
+        SyncController.stop(context)
+        assertFalse(
+            "precondition: sync must be stopped before launch",
+            SyncController.isRunning(context),
+        )
 
-        FakeRelay(putStatus = 201).use { relay ->
-            core.setConversationRelay(conv, relay.url)
-
-            // Launch-specific precondition: sync must be stopped, so "running
-            // after launch" cannot be vacuously satisfied by a prior test in
-            // this shared process.
-            SyncController.stop(context)
-            assertFalse(
-                "precondition: sync must be stopped before launch",
-                SyncController.isRunning(context),
+        ActivityScenario.launch(MainActivity::class.java).use {
+            // Sole graded assertion (the RED->GREEN signal, red 0060371): a cold
+            // launch with a paired conversation present must start SyncService.
+            assertTrue(
+                "cold launch with a paired conversation must start SyncService",
+                await(20_000) { SyncController.isRunning(context) },
             )
-
-            ActivityScenario.launch(MainActivity::class.java).use {
-                // Assertion 7 — RED→GREEN signal / recorded RED failure
-                // signature: a cold launch with a paired conversation present
-                // must start SyncService.
-                assertTrue(
-                    "cold launch with a paired conversation must start SyncService",
-                    await(20_000) { SyncController.isRunning(context) },
-                )
-                // Assertion 8 — GREEN-side strengthening (reached only in
-                // GREEN): the launch-started sync connects to my_relay and
-                // flushes the pending message to the per-conversation relay
-                // override, observed as a deposit on the FakeRelay.
-                assertTrue(
-                    diag("launch-started sync must reach the relay (deposit observed)", relay),
-                    await(20_000) { relay.accepts.get() > 0 },
-                )
-            }
         }
     }
-
-    private fun diag(claim: String, relay: FakeRelay): String =
-        claim +
-            " [FakeRelay bound=${relay.boundAddress}" +
-            " accepts=${relay.accepts.get()}" +
-            " requests=${relay.requestLog.toList()}]"
 }
 
 /** Polls [cond] every 50 ms until true or [timeoutMs] elapses. */

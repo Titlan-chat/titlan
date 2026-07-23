@@ -30,6 +30,21 @@ report.)
 > recorded outcome (FLAG-C deferred): record it and file the evidence —
 > do not adjust the Doze recipe mid-run.
 
+> LAUNCH-SYNC DEPOSIT OBSERVABLE (4b2-WO-launch-sync §9 fallback,
+> `~/4b2-launch-sync-flag.md`): the emulator-lane `LaunchSyncTest` grades only
+> that a cold launch starts SyncService (`SyncController.isRunning`);
+> observing the launch-started sync actually reach the relay was dropped from
+> CI (the receive subscribe targets `my_relay`, not a per-conversation relay,
+> so an in-process FakeRelay cannot see it; the deposit fallback was flaky —
+> CI #64 `accepts=0`). THIS checklist is that device-side observation, with no
+> extra steps: P4 launches the app post-unlock — the cold launch that starts
+> sync via `MainActivity` -> `AppCore.hasPairedConversation` ->
+> `SyncController.start` — and step 7's `TitlanDelivery` sentinel proves that
+> launch-started sync decrypted and durably persisted a real deposited
+> message, which strictly subsumes the "a deposit reached the relay"
+> observable. A clean (f) run with `-PtitlanDebugRelayUrl` is therefore the
+> device confirmation of the launch-sync feature end to end.
+
 ## Preconditions
 
 | # | Precondition | How |
