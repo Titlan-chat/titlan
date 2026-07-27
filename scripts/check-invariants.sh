@@ -309,6 +309,62 @@ if [ "$env_files" != "$titlan_app" ]; then
   fail=1
 fi
 
+# --- 9. Scan-input hash probe — debug-gated at decodeLink ENTRY, hash+len ONLY (4b-2) ---
+# 4b-2 measurement instrument (maintainer-ratified receipt 4b2-WO-scan-hash-probe):
+# ONE debug-only logcat line at the entry of QrCodec.decodeLink — the single point
+# BOTH scan transports funnel through (the camera path wraps the ZXing-decoded text
+# back into a link, the link-paste path passes the trimmed field) — carrying ONLY
+# the SHA-256 hex of the received string's UTF-8 bytes and its length in chars. No
+# payload content and no prefix of it is ever emitted (INV-1); the hash is one-way
+# and the length is a bare count. Pinned like §6/§8: fixed-literal tag + emission,
+# single-file scope, and gate-before-decode asserted by line order.
+qr_codec="titlan-android/app/src/main/kotlin/app/titlan/pairing/QrCodec.kt"
+scan_probe_tag='TitlanScanProbe'
+scan_probe_gate='if (BuildConfig.DEBUG) probeScanInput(link)'
+scan_probe_emit='Log.i(SCAN_PROBE_TAG, "sha256=$hex len=${link.length}")'
+# 9a. Single-sourced tag literal.
+if ! grep -qF "SCAN_PROBE_TAG = \"$scan_probe_tag\"" "$qr_codec"; then
+  echo "scan probe: SCAN_PROBE_TAG literal missing/changed in $qr_codec"
+  fail=1
+fi
+# 9b. The fingerprint is SHA-256 over the FULL received string's UTF-8 bytes — the
+#     whole link, so the emitted hash is of exactly what decodeLink got, never a
+#     prefix. Two single-line pins: the digest algorithm and its input.
+if ! grep -qF 'MessageDigest.getInstance("SHA-256")' "$qr_codec"; then
+  echo "scan probe: SHA-256 digest construction missing/changed in $qr_codec"
+  fail=1
+fi
+if ! grep -qF '.digest(link.toByteArray(Charsets.UTF_8))' "$qr_codec"; then
+  echo "scan probe: hash is not taken over the full received string's UTF-8 bytes in $qr_codec"
+  fail=1
+fi
+# 9c. The SOLE emission is the pinned hash+length line; its only dynamic parts are
+#     the hash hex and link.length, so no payload byte can leak into logcat.
+if ! grep -qF "$scan_probe_emit" "$qr_codec"; then
+  echo "scan probe: pinned hash+length emission missing/changed in $qr_codec"
+  fail=1
+fi
+# 9d. Debug-gated, and positioned at decodeLink ENTRY: the gate line precedes the
+#     require() that begins the decode, so the probe fingerprints the input as
+#     received — before any validation or transformation.
+if ! grep -qF "$scan_probe_gate" "$qr_codec"; then
+  echo "scan probe: debug-gated probe call missing from $qr_codec"
+  fail=1
+fi
+scan_gate_line=$(grep -nF "$scan_probe_gate" "$qr_codec" | head -n 1 | cut -d: -f1 || true)
+scan_require_line=$(grep -nF 'require(link.startsWith(LINK_PREFIX))' "$qr_codec" | head -n 1 | cut -d: -f1 || true)
+if [ -z "$scan_gate_line" ] || [ -z "$scan_require_line" ] || [ "$scan_gate_line" -ge "$scan_require_line" ]; then
+  echo "scan probe: gate does not precede decodeLink's require in $qr_codec (gate=$scan_gate_line require=$scan_require_line)"
+  fail=1
+fi
+# 9e. No OTHER logcat emitter in the file — the probe is the only one.
+scan_stray=$(grep -n 'Log\.' "$qr_codec" | grep -vF "$scan_probe_emit" | grep -vF 'import android.util.Log' || true)
+if [ -n "$scan_stray" ]; then
+  echo "scan probe: $qr_codec logs beyond the single pinned hash+length line:"
+  echo "$scan_stray"
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
