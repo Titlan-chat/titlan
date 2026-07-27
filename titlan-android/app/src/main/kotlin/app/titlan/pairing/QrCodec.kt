@@ -4,6 +4,8 @@
 package app.titlan.pairing
 
 import android.util.Base64
+import android.util.Log
+import app.titlan.BuildConfig
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.DecodeHintType
 import com.google.zxing.EncodeHintType
@@ -14,6 +16,7 @@ import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeReader
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import java.security.MessageDigest
 
 /**
  * Byte-identical QR / `titlan://` codec for the pairing offer (frozen design
@@ -61,13 +64,35 @@ object QrCodec {
 
     /** Decodes a `titlan://pair#…` link's fragment back to offer bytes. */
     fun decodeLink(link: String): ByteArray {
+        if (BuildConfig.DEBUG) probeScanInput(link)
         require(link.startsWith(LINK_PREFIX)) { "not a titlan://pair# link" }
         return unb64(link.substring(LINK_PREFIX.length))
+    }
+
+    /**
+     * Debug-only 4b-2 measurement probe (maintainer-ratified receipt
+     * 4b2-WO-scan-hash-probe). Both scan transports funnel through [decodeLink]
+     * — the camera path wraps the ZXing-decoded text back into a link, the
+     * link-paste path passes the trimmed field — so this one call at its entry
+     * fingerprints exactly what the on-device scan path hands the FFI parse.
+     * Emits ONE logcat line carrying ONLY the SHA-256 hex of the received
+     * string's UTF-8 bytes and its length in chars: no payload content and no
+     * prefix of it is ever logged (INV-1) — the hash is one-way and the length
+     * is a bare count. Release builds compile this branch out (DEBUG = false).
+     * Pinned by scripts/check-invariants.sh §9.
+     */
+    private fun probeScanInput(link: String) {
+        val digest = MessageDigest.getInstance("SHA-256").digest(link.toByteArray(Charsets.UTF_8))
+        val hex = digest.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        Log.i(SCAN_PROBE_TAG, "sha256=$hex len=${link.length}")
     }
 
     private const val LINK_PREFIX = "titlan://pair#"
     private const val QUIET_ZONE = 4
     private const val B64_FLAGS = Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+
+    /** Debug-only scan-input hash-probe logcat tag (4b-2 measurement instrument). */
+    private const val SCAN_PROBE_TAG = "TitlanScanProbe"
 
     private fun b64(bytes: ByteArray): String = Base64.encodeToString(bytes, B64_FLAGS)
     private fun unb64(s: String): ByteArray = Base64.decode(s, B64_FLAGS)
