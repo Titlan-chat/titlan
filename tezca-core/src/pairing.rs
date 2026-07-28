@@ -499,4 +499,180 @@ mod v2_tests {
         assert_eq!(i.len(), 43);
         assert_eq!(c, contrib);
     }
+
+    // ---- committed QR-codec conformance vector (4b2-WO-codec-fixture-tests) --
+    // The QrCodec dual-sourcing ledger item, landed as a permanent guard: ONE
+    // committed pairing-offer vector (proto/fixtures/) is decoded and parsed by
+    // BOTH stacks — this test (Rust) and the app's plain-JVM
+    // QrCodecConformanceTest (Kotlin) — so the link wire encoding cannot drift
+    // on either side without a red build. The vector is fully deterministic and
+    // regenerable from this file alone: production field SIZES (66-char
+    // address, 33-byte EC keys, 64-byte sigs, 1569-byte Kyber-1024 pub,
+    // per-offer onetime id 2 → 1897-byte bundle, 1997-byte offer — the exact
+    // dimensions of a live offer), synthetic CONTENT (fixed fills; the offer
+    // codec is pure framing and verifies no cryptography, INV-6), loopback
+    // relay URL only — no relay, no network, no LAN address.
+
+    const CONFORMANCE_RELAY: &str = "wss://127.0.0.1:8443";
+    const CONFORMANCE_INBOX: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const CONFORMANCE_SECRET: [u8; PAIRING_SECRET_LEN] = [0x42; PAIRING_SECRET_LEN];
+
+    const CONFORMANCE_LINK: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../proto/fixtures/pairing-offer-v2.link.txt"
+    ));
+    const CONFORMANCE_EXPECTED: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../proto/fixtures/pairing-offer-v2.expected.txt"
+    ));
+
+    fn conformance_bundle() -> BundleData {
+        let mut identity_key = vec![0x11u8; 33];
+        identity_key[0] = 0x05; // libsignal EC point type byte — shape realism only
+        BundleData {
+            address_name: "a".repeat(66),
+            registration_id: 0x1234,
+            device_id: 1,
+            identity_key,
+            signed_prekey_id: 7,
+            signed_prekey_pub: vec![0x22; 33],
+            signed_prekey_sig: vec![0x33; 64],
+            kyber_prekey_id: 9,
+            kyber_prekey_pub: vec![0x44; 1569],
+            kyber_prekey_sig: vec![0x55; 64],
+            onetime_prekey: Some((2, vec![0x66; 33])),
+        }
+    }
+
+    fn conformance_offer_payload() -> Vec<u8> {
+        encode_pairing_offer(
+            &serialize(&conformance_bundle()),
+            CONFORMANCE_RELAY,
+            CONFORMANCE_INBOX,
+            &CONFORMANCE_SECRET,
+        )
+    }
+
+    // base64url (no padding), mirroring examples/deposit_harness.rs: hand-rolled
+    // to stay dependency-free — an encoding, not cryptography (INV-6 untouched).
+    const B64URL_ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+    fn b64url_encode(data: &[u8]) -> String {
+        let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+        for chunk in data.chunks(3) {
+            let b0 = chunk[0] as u32;
+            let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+            let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+            let n = (b0 << 16) | (b1 << 8) | b2;
+            out.push(B64URL_ALPHABET[(n >> 18) as usize & 63] as char);
+            out.push(B64URL_ALPHABET[(n >> 12) as usize & 63] as char);
+            if chunk.len() > 1 {
+                out.push(B64URL_ALPHABET[(n >> 6) as usize & 63] as char);
+            }
+            if chunk.len() > 2 {
+                out.push(B64URL_ALPHABET[n as usize & 63] as char);
+            }
+        }
+        out
+    }
+
+    /// Strict RFC 4648 url-safe decode: url alphabet only, no padding, no
+    /// whitespace — anything else panics (this is test-side tooling).
+    fn b64url_decode(s: &str) -> Vec<u8> {
+        let val = |c: u8| -> u32 {
+            B64URL_ALPHABET
+                .iter()
+                .position(|&a| a == c)
+                .unwrap_or_else(|| panic!("non-b64url byte {c:#04x}")) as u32
+        };
+        let bytes = s.as_bytes();
+        assert!(bytes.len() % 4 != 1, "invalid b64url length");
+        let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+        for chunk in bytes.chunks(4) {
+            let n = chunk.iter().fold(0u32, |acc, &c| (acc << 6) | val(c));
+            match chunk.len() {
+                4 => out.extend_from_slice(&[(n >> 16) as u8, (n >> 8) as u8, n as u8]),
+                3 => out.extend_from_slice(&[(n >> 10) as u8, (n >> 2) as u8]),
+                2 => out.push((n >> 4) as u8),
+                _ => unreachable!("length % 4 == 1 rejected above"),
+            }
+        }
+        out
+    }
+
+    fn conformance_expected(key: &str) -> String {
+        CONFORMANCE_EXPECTED
+            .lines()
+            .find_map(|l| {
+                l.strip_prefix(key)
+                    .and_then(|r| r.strip_prefix('='))
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| panic!("missing {key} in expected fixture"))
+    }
+
+    #[test]
+    fn committed_conformance_vector_link_round_trips_and_parses() {
+        let fragment = CONFORMANCE_LINK
+            .strip_prefix("titlan://pair#")
+            .expect("committed link carries the titlan://pair# prefix");
+
+        // Decode the committed link; the encode direction must reproduce the
+        // committed fragment byte-for-byte (link-encode → decode round-trip).
+        let payload = b64url_decode(fragment);
+        assert_eq!(
+            b64url_encode(&payload),
+            fragment,
+            "b64url re-encode mismatch"
+        );
+
+        // The committed vector IS the deterministic in-repo construction.
+        assert_eq!(
+            payload,
+            conformance_offer_payload(),
+            "committed vector != deterministic construction"
+        );
+
+        // Pinned decoded-bytes hash + length (single-sourced with the Kotlin
+        // side via proto/fixtures/pairing-offer-v2.expected.txt). SHA-256 via
+        // signal-crypto — the ratified crypto source (INV-6), no new crates.
+        let mut hasher = signal_crypto::CryptographicHash::new("Sha256")
+            .expect("Sha256 is a supported signal-crypto digest");
+        hasher.update(&payload);
+        assert_eq!(
+            hex::encode(hasher.finalize()),
+            conformance_expected("decoded_sha256"),
+            "pinned decoded-bytes sha256"
+        );
+        assert_eq!(
+            payload.len().to_string(),
+            conformance_expected("decoded_len"),
+            "pinned decoded-bytes length"
+        );
+
+        // The real offer parser accepts the vector; parse fields are pinned.
+        let (bundle, relay, inbox, secret) =
+            parse_pairing_offer(&payload).expect("committed vector parses");
+        assert_eq!(relay, conformance_expected("relay"), "pinned relay");
+        assert_eq!(inbox, conformance_expected("inbox"), "pinned inbox");
+        assert_eq!(secret, CONFORMANCE_SECRET, "pinned pairing secret");
+        assert_eq!(
+            bundle.len().to_string(),
+            conformance_expected("bundle_len"),
+            "pinned bundle length"
+        );
+        let data = parse(&bundle).expect("committed bundle parses");
+        let onetime_id = data
+            .onetime_prekey
+            .as_ref()
+            .map(|(id, _)| *id)
+            .expect("onetime prekey present");
+        assert_eq!(
+            onetime_id.to_string(),
+            conformance_expected("onetime_id"),
+            "pinned onetime id"
+        );
+        assert_eq!(data.kyber_prekey_pub.len(), 1569, "kyber pub length");
+    }
 }
