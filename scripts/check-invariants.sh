@@ -185,6 +185,13 @@ if [ "$scanned_debug" -eq 0 ] || [ "$scanned_release" -eq 0 ]; then
   echo "note: 5e artifact scan skipped (debug=$scanned_debug release=$scanned_release — .so not built in this run)"
 fi
 
+# --- 4b-2 FFI-bisect probe emissions (pinned by §10) --------------------------
+# Defined ahead of §6/§9 because their stray-log filters must exclude exactly
+# these pinned lines and nothing else.
+decode_probe_emit='Log.i(DECODE_PROBE_TAG, "sha256=$hex len=${bytes.size}")'
+ffi_probe_emit='Log.i(FFI_PROBE_TAG, "sha256=$hex len=${bytes.size}")'
+ffi_error_emit='Log.i(FFI_ERROR_TAG, "variant=${t.javaClass.simpleName} msgSha256=$msgHex msgLen=${msg.length}")'
+
 # --- 6. Debug delivery sentinel — exists, fixed-literal, debug-gated (§9d) ----
 # Checklist (f) t1 marker (maintainer-ratified F1): ONE debug-only logcat line
 # in CoreClient.kt at the ack-after-persist delivery point. Hygiene is proven
@@ -211,9 +218,10 @@ if ! grep -qF "$sentinel_call" "$core_client"; then
   fail=1
 fi
 stray_logs=$(grep -n 'Log\.' "$core_client" | grep -vF "$sentinel_call" \
-  | grep -vF 'import android.util.Log' || true)
+  | grep -vF 'import android.util.Log' \
+  | grep -vF "$ffi_probe_emit" | grep -vF "$ffi_error_emit" || true)
 if [ -n "$stray_logs" ]; then
-  echo "delivery sentinel: CoreClient.kt logs beyond the single pinned sentinel line:"
+  echo "delivery sentinel: CoreClient.kt logs beyond the pinned sentinel + §10 probe lines:"
   echo "$stray_logs"
   fail=1
 fi
@@ -357,11 +365,104 @@ if [ -z "$scan_gate_line" ] || [ -z "$scan_require_line" ] || [ "$scan_gate_line
   echo "scan probe: gate does not precede decodeLink's require in $qr_codec (gate=$scan_gate_line require=$scan_require_line)"
   fail=1
 fi
-# 9e. No OTHER logcat emitter in the file — the probe is the only one.
-scan_stray=$(grep -n 'Log\.' "$qr_codec" | grep -vF "$scan_probe_emit" | grep -vF 'import android.util.Log' || true)
+# 9e. No OTHER logcat emitter in the file — only this probe and §10a's.
+scan_stray=$(grep -n 'Log\.' "$qr_codec" | grep -vF "$scan_probe_emit" \
+  | grep -vF "$decode_probe_emit" | grep -vF 'import android.util.Log' || true)
 if [ -n "$scan_stray" ]; then
-  echo "scan probe: $qr_codec logs beyond the single pinned hash+length line:"
+  echo "scan probe: $qr_codec logs beyond the pinned §9/§10a hash+length lines:"
   echo "$scan_stray"
+  fail=1
+fi
+
+# --- 10. FFI-bisect probes — decode result + pairing FFI seam (4b-2) ----------
+# 4b-2 measurement instruments (maintainer-ratified receipt 4b2-WO-ffi-bisect).
+# Given §9's proof of byte-perfect delivery INTO decodeLink, three debug-only
+# probes partition the remaining on-device window:
+#   10a  decode result — QrCodec.decodeLink fingerprints the DECODED offer
+#        bytes between decode and return, so the on-device android.util.Base64
+#        output diffs directly against the host fixture's decoded-bytes hash.
+#   10b  FFI entry — CoreClient.kt fingerprints EXACTLY the bytes handed to
+#        ffi.beginPairingFromOffer, immediately before the uniffi crossing.
+#   10c  FFI error — on failure, the TitlanException variant (class simple
+#        name) plus the SHA-256 hex and length of its message, rethrown
+#        unchanged. The message itself never reaches logcat: it may embed
+#        offer-derived content (INV-1); the hash matches against the closed
+#        set of core error literals host-side.
+# Hygiene as §6/§8/§9: fixed-literal tags and emissions whose only dynamic
+# parts are hash hex, bare counts, and the variant identifier; debug-gated;
+# the §6/§9e stray-log filters exclude exactly these pinned emissions.
+
+# 10a. Decode-result probe in QrCodec.kt.
+decode_probe_tag='TitlanDecodeProbe'
+decode_probe_gate='if (BuildConfig.DEBUG) probeDecodedResult(bytes)'
+if ! grep -qF "DECODE_PROBE_TAG = \"$decode_probe_tag\"" "$qr_codec"; then
+  echo "ffi-bisect: DECODE_PROBE_TAG literal missing/changed in $qr_codec"
+  fail=1
+fi
+if ! grep -qF "$decode_probe_emit" "$qr_codec"; then
+  echo "ffi-bisect: pinned decode-result emission missing/changed in $qr_codec"
+  fail=1
+fi
+if ! grep -qF "$decode_probe_gate" "$qr_codec"; then
+  echo "ffi-bisect: debug-gated decode-result probe call missing from $qr_codec"
+  fail=1
+fi
+# Positioned on the RESULT: after the require() that begins the decode (§9d's
+# anchor) and before decodeLink's return, so it hashes what decodeLink hands
+# back — the decoded binary offer, nothing earlier and nothing later.
+decode_gate_line=$(grep -nF "$decode_probe_gate" "$qr_codec" | head -n 1 | cut -d: -f1 || true)
+decode_return_line=$(grep -nF 'return bytes' "$qr_codec" | head -n 1 | cut -d: -f1 || true)
+if [ -z "$decode_gate_line" ] || [ -z "$scan_require_line" ] || [ -z "$decode_return_line" ] \
+   || [ "$decode_gate_line" -le "$scan_require_line" ] || [ "$decode_gate_line" -ge "$decode_return_line" ]; then
+  echo "ffi-bisect: decode-result probe not between decode and return in $qr_codec (require=$scan_require_line gate=$decode_gate_line return=$decode_return_line)"
+  fail=1
+fi
+
+# 10b. FFI-entry probe in CoreClient.kt — the last Kotlin statement before the
+#      generated binding runs.
+ffi_probe_tag='TitlanFfiProbe'
+ffi_probe_gate='if (BuildConfig.DEBUG) probeFfiInput(offerBytes)'
+ffi_call='ffi.beginPairingFromOffer(offerBytes)'
+if ! grep -qF "FFI_PROBE_TAG = \"$ffi_probe_tag\"" "$core_client"; then
+  echo "ffi-bisect: FFI_PROBE_TAG literal missing/changed in $core_client"
+  fail=1
+fi
+if ! grep -qF "$ffi_probe_emit" "$core_client"; then
+  echo "ffi-bisect: pinned FFI-entry emission missing/changed in $core_client"
+  fail=1
+fi
+if ! grep -qF "$ffi_probe_gate" "$core_client"; then
+  echo "ffi-bisect: debug-gated FFI-entry probe call missing from $core_client"
+  fail=1
+fi
+ffi_gate_line=$(grep -nF "$ffi_probe_gate" "$core_client" | head -n 1 | cut -d: -f1 || true)
+ffi_call_line=$(grep -nF "$ffi_call" "$core_client" | head -n 1 | cut -d: -f1 || true)
+if [ -z "$ffi_gate_line" ] || [ -z "$ffi_call_line" ] || [ "$ffi_gate_line" -ge "$ffi_call_line" ]; then
+  echo "ffi-bisect: FFI-entry probe does not precede the uniffi pairing call in $core_client (gate=$ffi_gate_line call=$ffi_call_line)"
+  fail=1
+fi
+
+# 10c. FFI-error probe in CoreClient.kt: fires only when the crossing throws,
+#      after the call site, and the exception is rethrown unchanged.
+ffi_error_tag='TitlanFfiError'
+ffi_error_gate='if (BuildConfig.DEBUG) probeFfiError(t)'
+if ! grep -qF "FFI_ERROR_TAG = \"$ffi_error_tag\"" "$core_client"; then
+  echo "ffi-bisect: FFI_ERROR_TAG literal missing/changed in $core_client"
+  fail=1
+fi
+if ! grep -qF "$ffi_error_emit" "$core_client"; then
+  echo "ffi-bisect: pinned FFI-error emission missing/changed in $core_client"
+  fail=1
+fi
+if ! grep -qF "$ffi_error_gate" "$core_client"; then
+  echo "ffi-bisect: debug-gated FFI-error probe call missing from $core_client"
+  fail=1
+fi
+ffi_err_line=$(grep -nF "$ffi_error_gate" "$core_client" | head -n 1 | cut -d: -f1 || true)
+ffi_throw_line=$(grep -nF 'throw t' "$core_client" | head -n 1 | cut -d: -f1 || true)
+if [ -z "$ffi_err_line" ] || [ -z "$ffi_throw_line" ] || [ -z "$ffi_call_line" ] \
+   || [ "$ffi_err_line" -le "$ffi_call_line" ] || [ "$ffi_err_line" -ge "$ffi_throw_line" ]; then
+  echo "ffi-bisect: FFI-error probe must sit between the uniffi call and its rethrow in $core_client (call=$ffi_call_line probe=$ffi_err_line throw=$ffi_throw_line)"
   fail=1
 fi
 
@@ -370,4 +471,4 @@ if [ "$fail" -ne 0 ]; then
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe)."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes)."
