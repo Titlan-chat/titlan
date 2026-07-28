@@ -66,7 +66,9 @@ object QrCodec {
     fun decodeLink(link: String): ByteArray {
         if (BuildConfig.DEBUG) probeScanInput(link)
         require(link.startsWith(LINK_PREFIX)) { "not a titlan://pair# link" }
-        return unb64(link.substring(LINK_PREFIX.length))
+        val bytes = unb64(link.substring(LINK_PREFIX.length))
+        if (BuildConfig.DEBUG) probeDecodedResult(bytes)
+        return bytes
     }
 
     /**
@@ -87,12 +89,31 @@ object QrCodec {
         Log.i(SCAN_PROBE_TAG, "sha256=$hex len=${link.length}")
     }
 
+    /**
+     * Debug-only 4b-2 bisect probe (maintainer-ratified receipt
+     * 4b2-WO-ffi-bisect): fingerprints decodeLink's RESULT — the decoded
+     * binary offer — so the on-device `android.util.Base64` output diffs
+     * directly against the host fixture's decoded-bytes hash. Emits ONE
+     * logcat line carrying ONLY the SHA-256 hex of the decoded bytes and
+     * their count: no payload content and no prefix of it is ever logged
+     * (INV-1). Release builds compile this branch out (DEBUG = false).
+     * Pinned by scripts/check-invariants.sh §10a.
+     */
+    private fun probeDecodedResult(bytes: ByteArray) {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        val hex = digest.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        Log.i(DECODE_PROBE_TAG, "sha256=$hex len=${bytes.size}")
+    }
+
     private const val LINK_PREFIX = "titlan://pair#"
     private const val QUIET_ZONE = 4
     private const val B64_FLAGS = Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
 
     /** Debug-only scan-input hash-probe logcat tag (4b-2 measurement instrument). */
     private const val SCAN_PROBE_TAG = "TitlanScanProbe"
+
+    /** Debug-only decode-result hash-probe logcat tag (4b-2 bisect instrument). */
+    private const val DECODE_PROBE_TAG = "TitlanDecodeProbe"
 
     private fun b64(bytes: ByteArray): String = Base64.encodeToString(bytes, B64_FLAGS)
     private fun unb64(s: String): ByteArray = Base64.decode(s, B64_FLAGS)

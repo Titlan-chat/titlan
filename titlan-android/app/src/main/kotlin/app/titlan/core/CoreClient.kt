@@ -5,6 +5,7 @@ package app.titlan.core
 
 import android.util.Log
 import app.titlan.BuildConfig
+import java.security.MessageDigest
 import app.titlan.sync.ConnectionState
 import app.titlan.sync.SyncEvents
 import uniffi.tezca_core.FfiClient
@@ -72,8 +73,15 @@ private class FfiCoreClient(private val ffi: FfiClient) : CoreClient {
     override fun initializeIdentity() = ffi.initializeIdentity()
     override fun isInitialized(): Boolean = ffi.isInitialized()
     override fun exportPairingOffer(): ByteArray = ffi.exportPairingOffer()
-    override fun beginPairingFromOffer(offerBytes: ByteArray): ByteArray =
-        ffi.beginPairingFromOffer(offerBytes)
+    override fun beginPairingFromOffer(offerBytes: ByteArray): ByteArray {
+        if (BuildConfig.DEBUG) probeFfiInput(offerBytes)
+        try {
+            return ffi.beginPairingFromOffer(offerBytes)
+        } catch (t: Throwable) {
+            if (BuildConfig.DEBUG) probeFfiError(t)
+            throw t
+        }
+    }
 
     override fun peekOfferRelay(offerBytes: ByteArray): String = ffi.peekOfferRelay(offerBytes)
 
@@ -103,6 +111,35 @@ private class FfiCoreClient(private val ffi: FfiClient) : CoreClient {
  */
 private const val DELIVERY_SENTINEL_TAG = "TitlanDelivery"
 private const val DELIVERY_SENTINEL_TEXT = "chat delivery persisted"
+
+/**
+ * Debug-only 4b-2 bisect probes at the FFI seam (maintainer-ratified receipt
+ * 4b2-WO-ffi-bisect). [probeFfiInput] fingerprints EXACTLY the bytes handed to
+ * the uniffi pairing call, immediately before the crossing; [probeFfiError]
+ * captures the failure surfaced across it — the exception class simple name
+ * (the TitlanException variant), the SHA-256 hex of its message, and the
+ * message length — after which the exception is rethrown unchanged. Only hash
+ * hex, bare counts, and the variant identifier reach logcat: no payload byte
+ * and no message text (a core error message may embed offer-derived content —
+ * INV-1). Release builds compile both branches out (DEBUG = false). Pinned by
+ * scripts/check-invariants.sh §10b/§10c.
+ */
+private const val FFI_PROBE_TAG = "TitlanFfiProbe"
+private const val FFI_ERROR_TAG = "TitlanFfiError"
+
+private fun probeFfiInput(bytes: ByteArray) {
+    val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+    val hex = digest.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    Log.i(FFI_PROBE_TAG, "sha256=$hex len=${bytes.size}")
+}
+
+private fun probeFfiError(t: Throwable) {
+    val msg = t.message ?: ""
+    val msgHex = MessageDigest.getInstance("SHA-256")
+        .digest(msg.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    Log.i(FFI_ERROR_TAG, "variant=${t.javaClass.simpleName} msgSha256=$msgHex msgLen=${msg.length}")
+}
 
 /** Fans core message delivery into the app's [SyncEvents]. */
 private class ReceiverAdapter(private val events: SyncEvents) : FfiMessageReceiver {
