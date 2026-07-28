@@ -55,4 +55,32 @@ duplicates the other.
   (flagged 2026-07-21). Until that lands, a dismissed offer remains
   single-use and lapses at its 1 h TTL; the UI states this honestly. The
   follow-up is: core cancel method (stop the pairing listener, forget the
-  secret) + relay-side `DELETE /v1/mailboxes/{pairing_inbox}`.
+  secret) + relay-side `DELETE /v1/mailboxes/{pairing_inbox}`. Related, by
+  design: pairing/offer listeners are not cancelled by `stop_sync` — they
+  end on pairing completion, proof-of-scan burn, inbox retirement, or offer
+  TTL (4b2-WO-stop-sync).
+- **Pairing-accept error mapping (4b-3, recorded 2026-07-28).** The accept
+  path maps every failure — including the `Network` variant — onto the one
+  "stale or malformed" dialog string, so an unreachable relay reads as a bad
+  offer. Split the mapping so network-layer failures surface as reachability
+  problems. Evidence: `4b2-WO-ffi-bisect` and the 2026-07-27/28 device
+  sessions.
+- **Offer TTL vs harness wait fuse (design gate, recorded 2026-07-28).** The
+  deposit harness's `DEFAULT_WAIT_SECS` is a 600 s wait fuse from mint; the
+  frozen design gives offers a 1 h TTL. Reconcile which value governs, and
+  where.
+- **Link-paste field usability (4b-3, recorded 2026-07-28).** The §5 paste
+  field is reachable only via the camera-permission-denied trigger; with a
+  ~2.6 KB link pasted its accept button sits off-screen; the screen does not
+  scroll; keyevent 66 / 61+66 do not submit.
+- **Blank post-pairing screen (4b-3, recorded 2026-07-28).** Pairing success
+  renders only a status line; there is no conversation-list navigation.
+- **Swallowed peek failure (4b-3, recorded 2026-07-28).**
+  `PairingScreen.kt:357-358` wraps `peekOfferRelay` in
+  `runCatching{}.getOrNull()` — the first core touch on the scan path, with
+  every failure silently swallowed. Surface or log-gate the failure.
+- **Bounded network-I/O timeouts (Phase 5 hardening, recorded 2026-07-28).**
+  No timeouts are configured on relay HTTP/WS operations, so a joined
+  `stop_sync` landing during a control frame's shielded network leg waits on
+  OS TCP behavior (`4b2-WO-stop-sync` FLAG-3). Add bounded network-I/O
+  timeouts across the relay client.

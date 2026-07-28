@@ -87,8 +87,12 @@ exact new filename before scanning.
 ```
 QR=/tmp/pair-$(date +%H%M%S).png
 qrencode -o "$QR" -s 10 -m 4 -8 "$(cat /tmp/link.txt)"
-xdg-open "$QR"   # check the title bar shows THIS filename before scanning
+scp "$QR" <user>@<display-host>:   # e.g. the Windows host — see below
 ```
+
+The VM is operated over SSH and runs no image viewer: transfer the PNG to the
+machine with the screen (e.g. `scp` to the Windows host) and open it THERE.
+The title-bar filename check is performed in THAT viewer before scanning.
 
 This invocation is the settled safe form: the scan-hash probe proved the
 `qrencode` → camera → ZXing transport byte-perfect at this density
