@@ -41,6 +41,24 @@ autonomously.
   design is sound and even when the maintainer resolved the open flags: the
   explicit "approved" is the gate, not your assessment that it is ready.
 
+## Design-assumption failures
+
+- If implementation reveals a frozen design assumption is false, halt green
+  work, report the assumption and the evidence, and wait for maintainer
+  ratification of a superseding resolution. Never substitute an equivalent
+  mechanism silently. (Adopted 2026-07-28; canonical instance: the libsignal
+  HKDF/shared-secret API gap discovered in the 4b-2 green phase, resolved by
+  maintainer ratification — work-order §10 records both resolutions.)
+
+## Phase preconditions
+
+- Phase preconditions are gates: before executing any work order that opens
+  a new phase, verify in titlan-mvp-work-order.md that every precondition
+  named for that phase is marked ratified/RESOLVED. If any is not, STOP and
+  FLAG — do not proceed regardless of the order's wording. (Adopted
+  2026-07-28; first instance: the Protocol Horizon design gate before
+  Phase 5.)
+
 ## Push boundary
 
 - Push boundary: the agent commits locally but NEVER pushes, merges, or
