@@ -8,6 +8,22 @@ on a real device / local emulator at phase acceptance, with captured evidence
 filed into the PR (frozen design §9). Both are scripted — free-form poking is
 rejected — so a reviewer can re-run them and get comparable output.
 
+Pairing-dependent runs additionally follow the operational pairing procedure
+in `docs/checklists/4b2-pairing-device.md` (harness-as-offerer; LAN
+reachability checked first, mint-to-scan freshness, probe-verified scan).
+
+## Device connection stability (VirtualBox USB passthrough)
+
+The physical device reaches the build VM's adb over VirtualBox USB
+passthrough. Operational findings (2026-07-27/28):
+
+- **Boot-time capture is the reliable method**: attach the USB filter so the
+  device is captured when the VM boots. Mid-session recapture fights Windows
+  for the device and loses often enough to be a time sink.
+- **Ghost-entry symptom** (device listed but dead — `adb devices` shows an
+  entry that no command can reach, or the capture toggle has no effect):
+  reboot the HOST. Nothing short of it reliably clears the state.
+
 ## (e) Locked-boot — declines cleanly
 
 Script: `scripts/device-locked-boot.sh` — sets a credential, reboots, and

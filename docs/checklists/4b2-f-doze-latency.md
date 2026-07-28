@@ -73,6 +73,18 @@ report.)
 All commands run on the build host ("VM") from the repo root; the device
 side is covered by P2/P2b.
 
+> LAN-REACHABILITY PRECONDITION — checked FIRST, before pairing (step 5) and
+> before every measurement session: the device must reach the relay over the
+> LAN, verified by opening `https://<LAN-IP>:8443/healthz` in the PHONE's
+> browser. A certificate warning — or any response at all — means reachable;
+> a ~30 s hang means NOT reachable: stop and fix the network before touching
+> anything else. Reachability comes first because an unreachable relay
+> currently surfaces in the app as the misleading "stale or malformed"
+> pairing dialog (the accept path maps every failure, including the `Network`
+> error variant, onto that one string; UI mapping fix ledgered for 4b-3) —
+> without this check, a network problem masquerades as an offer failure.
+> Full procedure: `docs/checklists/4b2-pairing-device.md` §0.
+
 > RELAY-LIFETIME PRECONDITION — the relay process launched in step 2 must remain
 > the SAME process from pairing (step 5) through every measurement run. Relay
 > mailboxes are RAM-only (INV-3): a relay restart drops all mailboxes, and the
@@ -112,8 +124,13 @@ side is covered by P2/P2b.
      --relay wss://<LAN-IP>:8443
    ```
    then render the printed `titlan://pair#` link as a QR on the VM screen
-   with `qrencode -t ansiutf8 '<link>'` and scan it with the device's
-   pairing screen.
+   and scan it with the device's pairing screen — follow
+   `docs/checklists/4b2-pairing-device.md` for the operational form (offerer
+   BLOCKS: three-terminal layout; 600 s mint-to-scan fuse; render to a
+   UNIQUE timestamped PNG via
+   `qrencode -o <pair-HHMMSS.png> -s 10 -m 4 -8 "$(cat /tmp/link.txt)"` —
+   the settled safe invocation — and verify the scan by probe hash, not by
+   eyeball).
    (Non-designated alternative, documented only: device as offerer — show
    the offer on the device, transfer the on-screen `titlan://pair#` link
    text to the VM, then run the same command with `respond --dir
