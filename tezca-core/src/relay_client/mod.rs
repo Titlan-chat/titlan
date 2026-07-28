@@ -16,6 +16,8 @@ use std::time::Duration;
 
 use rand::TryRngCore;
 use tokio::runtime::Handle;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 use crate::client::{ConnectionObserver, ConnectionState, ConversationId, MessageReceiver};
 use crate::config::PaddingProfile;
@@ -47,6 +49,14 @@ struct OffererAwaitingFb {
     derived_recv: String,
 }
 
+/// One sync generation's cancellation plumbing (4b2-WO-stop-sync): every
+/// conversation listener spawned into the generation holds a subscription to
+/// `cancel`; `Engine::stop_sync` flips it true and joins `handles`.
+struct SyncTasks {
+    cancel: watch::Sender<bool>,
+    handles: Vec<JoinHandle<()>>,
+}
+
 /// Shared sync state; cloned (via `Arc`) into every listener task.
 pub(crate) struct Engine {
     store: Arc<Store>,
@@ -57,6 +67,10 @@ pub(crate) struct Engine {
     receiver: Mutex<Option<Arc<dyn MessageReceiver>>>,
     observer: Mutex<Option<Arc<dyn ConnectionObserver>>>,
     listening: Mutex<HashSet<ConversationId>>,
+    /// Live sync generation (4b2-WO-stop-sync): `None` when stopped or never
+    /// started; created lazily by the first [`Engine::spawn_conversation`].
+    /// Lock order everywhere: `sync` before `listening`.
+    sync: Mutex<Option<SyncTasks>>,
     /// In-flight offerer rotations (per conversation).
     rotation: Mutex<std::collections::HashMap<ConversationId, OffererAwaitingFb>>,
     /// `recovery-hello` replay dedup by `(generation, nonce)`, per conversation
@@ -91,6 +105,7 @@ impl Engine {
             receiver: Mutex::new(None),
             observer: Mutex::new(None),
             listening: Mutex::new(HashSet::new()),
+            sync: Mutex::new(None),
             rotation: Mutex::new(std::collections::HashMap::new()),
             hello_seen: Mutex::new(std::collections::HashMap::new()),
             exhaustion: Mutex::new(std::collections::HashMap::new()),
@@ -130,14 +145,52 @@ impl Engine {
         }
     }
 
-    /// Spawns a receive listener for a conversation (idempotent).
+    /// Spawns a receive listener for a conversation (idempotent per live
+    /// generation): the listener joins the current sync generation, creating a
+    /// fresh one if sync is stopped — so a pairing completed after `stop_sync`
+    /// still listens, and the NEXT `stop_sync` cancels it too.
     pub(crate) fn spawn_conversation(self: &Arc<Self>, conv: ConversationId) {
+        // Lock order: `sync` before `listening` (matches stop_sync).
+        let mut sync = self.sync.lock().expect("sync");
         if !self.listening.lock().expect("listening").insert(conv) {
             return;
         }
+        let tasks = sync.get_or_insert_with(|| SyncTasks {
+            cancel: watch::channel(false).0,
+            handles: Vec::new(),
+        });
+        let cancel = tasks.cancel.subscribe();
         let engine = self.clone();
-        self.handle
-            .spawn(async move { conversation_listener(engine, conv).await });
+        let handle = self
+            .handle
+            .spawn(async move { conversation_listener(engine, conv, cancel).await });
+        tasks.handles.push(handle);
+    }
+
+    /// Cancels every live conversation listener and waits for each task to
+    /// finish (joined stop — the lifecycle contract lives on
+    /// [`crate::client::TitlanClient::stop_sync`]). Ack-after-persist holds
+    /// across the cancellation because listeners observe the signal only
+    /// BETWEEN messages, never inside a handle→persist→ack span (see
+    /// [`conversation_listener`]). Pairing listeners are not sync tasks and
+    /// are not cancelled here: they end on pairing completion, proof-of-scan
+    /// burn, inbox retirement, or offer TTL.
+    pub(crate) async fn stop_sync(&self) -> Result<()> {
+        let taken = {
+            let mut sync = self.sync.lock().expect("sync");
+            self.listening.lock().expect("listening").clear();
+            sync.take()
+        }; // both locks released before any await below
+        let Some(tasks) = taken else {
+            return Ok(()); // stop-before-start / double-stop: nothing to do
+        };
+        let _ = tasks.cancel.send(true);
+        for handle in tasks.handles {
+            // A JoinError is only a listener panic/abort; the stop contract —
+            // "no sync task is running when this returns" — holds either way.
+            let _ = handle.await;
+        }
+        Ok(())
     }
 
     // ---- HTTP helpers ----
@@ -803,9 +856,32 @@ fn peer_role_u8(own_role: u8) -> u8 {
 
 /// Per-conversation receive loop: subscribe → deliver/ack → reconnect, with
 /// §10.7 recovery on a 404 for this side's inbox.
-async fn conversation_listener(engine: Arc<Engine>, conv: ConversationId) {
+/// Resolves when the sync generation's cancel signal flips true. Also
+/// resolves if the sender is gone (the generation was torn down) — an equally
+/// final stop signal.
+async fn cancelled(cancel: &mut watch::Receiver<bool>) {
+    let _ = cancel.wait_for(|stop| *stop).await;
+}
+
+/// Cancellation discipline (4b2-WO-stop-sync): every pure WAIT in this
+/// listener — subscribe, next-message, pending-flush, recovery attempt, and
+/// both backoff sleeps — is raced against [`cancelled`], so a joined stop
+/// returns promptly from any idle or connecting state. The ONE deliberately
+/// unraced span is an accepted message's handle→persist→ack: cancellation is
+/// checked only BETWEEN messages, so no interleaving can separate a persist
+/// from its ack (S3) — a message in flight at stop either completes
+/// persist→ack or was never accepted and stays un-acked (redelivered by the
+/// relay on the next start).
+async fn conversation_listener(
+    engine: Arc<Engine>,
+    conv: ConversationId,
+    mut cancel: watch::Receiver<bool>,
+) {
     let mut backoff = backoff::Backoff::new(random_seed());
     loop {
+        if *cancel.borrow() {
+            return;
+        }
         let Ok(Some(convo)) = engine.store.get_conversation(&conv) else {
             return;
         };
@@ -813,13 +889,29 @@ async fn conversation_listener(engine: Arc<Engine>, conv: ConversationId) {
             return;
         };
         engine.emit_state(conv, ConnectionState::Connecting);
-        match ws::subscribe(&engine.my_relay, &recv, convo.relay_pin).await {
+        let connected = tokio::select! {
+            _ = cancelled(&mut cancel) => return,
+            c = ws::subscribe(&engine.my_relay, &recv, convo.relay_pin) => c,
+        };
+        match connected {
             Connected::Ok(mut sub) => {
                 backoff.reset();
                 engine.emit_state(conv, ConnectionState::Online);
-                let _ = engine.flush_pending(&conv).await;
+                tokio::select! {
+                    _ = cancelled(&mut cancel) => return,
+                    _ = engine.flush_pending(&conv) => {}
+                }
                 let mut reconnect = false;
-                while let Ok(Some((msg_id, envelope))) = sub.next().await {
+                loop {
+                    let next = tokio::select! {
+                        _ = cancelled(&mut cancel) => return,
+                        n = sub.next() => n,
+                    };
+                    let Ok(Some((msg_id, envelope))) = next else {
+                        break; // subscription ended/errored → reconnect path
+                    };
+                    // S3 shield: from here to ack completion there is no
+                    // cancellation point (see the doc comment above).
                     let changed = engine
                         .handle_incoming(&conv, &convo.peer_address, &envelope)
                         .await;
@@ -842,9 +934,15 @@ async fn conversation_listener(engine: Arc<Engine>, conv: ConversationId) {
                         secs: backoff.current_secs(),
                     },
                 );
-                tokio::time::sleep(d).await;
+                tokio::select! {
+                    _ = cancelled(&mut cancel) => return,
+                    _ = tokio::time::sleep(d) => {}
+                }
             }
-            Connected::NotFound => match engine.recover(&conv).await {
+            Connected::NotFound => match tokio::select! {
+                _ = cancelled(&mut cancel) => return,
+                r = engine.recover(&conv) => r,
+            } {
                 Recovery::OneSided => {
                     engine.emit_state(conv, ConnectionState::Recovering);
                     backoff.reset();
@@ -864,7 +962,10 @@ async fn conversation_listener(engine: Arc<Engine>, conv: ConversationId) {
                 }
                 Recovery::Failed => {
                     let d = backoff.next_delay();
-                    tokio::time::sleep(d).await;
+                    tokio::select! {
+                        _ = cancelled(&mut cancel) => return,
+                        _ = tokio::time::sleep(d) => {}
+                    }
                 }
             },
             Connected::Unreachable => {
@@ -876,7 +977,10 @@ async fn conversation_listener(engine: Arc<Engine>, conv: ConversationId) {
                         secs: backoff.current_secs(),
                     },
                 );
-                tokio::time::sleep(d).await;
+                tokio::select! {
+                    _ = cancelled(&mut cancel) => return,
+                    _ = tokio::time::sleep(d) => {}
+                }
             }
         }
     }

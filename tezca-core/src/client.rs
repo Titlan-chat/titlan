@@ -224,9 +224,32 @@ impl TitlanClient {
         Ok(())
     }
 
-    /// Stops all sync tasks. They currently run on the shared runtime and end
-    /// when their subscriptions error out; explicit cancellation is post-MVP.
+    /// Stops receive-sync (4b2-WO-stop-sync): flips the live sync
+    /// generation's cancellation signal and JOINS every conversation-listener
+    /// task on the shared runtime before returning — a joined stop (S5): when
+    /// this returns, no sync task is running.
+    ///
+    /// Lifecycle (S2): `stop_sync` before any `start_sync` is `Ok` and does
+    /// nothing; calling `stop_sync` twice is `Ok` (the second call finds no
+    /// live generation); `start_sync` after `stop_sync` starts cleanly on a
+    /// fresh generation. A pairing completed while sync is stopped spawns its
+    /// listener into a fresh generation, which the NEXT `stop_sync` cancels.
+    ///
+    /// Ack-after-persist across stop (S3): listeners observe cancellation
+    /// only BETWEEN messages — the handle→persist→ack span of an accepted
+    /// message contains no cancellation point — so a stop can never produce
+    /// an ack for an unpersisted message; an unaccepted message stays
+    /// un-acked and the relay redelivers it on the next start.
+    ///
+    /// Why the joined stop cannot deadlock when called from the FFI/binder
+    /// thread: this `block_on` parks the CALLING thread, which is never one
+    /// of the shared runtime's two dedicated workers ("tezca-core"), so both
+    /// workers remain free to drive every listener to its next cancellation
+    /// checkpoint; no engine lock is held while joining (the registry locks
+    /// are released before the first await), and every listener wait is
+    /// raced against the cancel signal — the only unraced span is one
+    /// in-flight message's persist→ack.
     pub fn stop_sync(&self) -> Result<()> {
-        Ok(())
+        shared_runtime().block_on(self.engine.stop_sync())
     }
 }
