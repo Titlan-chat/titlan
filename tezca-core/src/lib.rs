@@ -24,6 +24,7 @@ pub mod ffi;
 pub mod identity;
 pub mod licensing;
 pub(crate) mod pairing;
+pub(crate) mod recovery;
 pub(crate) mod relay_client;
 pub mod session;
 pub mod storage;

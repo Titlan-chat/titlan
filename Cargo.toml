@@ -61,6 +61,17 @@ rustls-platform-verifier = "0.7"
 # SHA-256 of a cert SPKI in the optional per-conversation TLS pin verifier.
 ring = "0.17"
 uniffi = "0.32"
+# 4b-2 green (maintainer-ratified 2026-07-19, B1/F-dep-1): signal-crypto is
+# libsignal's own crypto crate (same git tag as libsignal-protocol) — the
+# INV-6-sanctioned home of HMAC-SHA256 (CryptographicMac). Used for the
+# pair-ack/2 proof-of-scan and the §8 derived-mailbox HMAC-PRF. deny.toml
+# already lists signal-crypto as the legitimate hmac/sha2 wrapper.
+signal-crypto = { version = "0.1.0", git = "https://github.com/signalapp/libsignal", tag = "v0.97.2" }
+# 4b-2 green (maintainer-ratified 2026-07-19, F-dep-2): constant-time equality
+# for the proof-of-scan compare. Pinned to the in-tree transitive version
+# (lockstep-adjacent; already present via curve25519-dalek). Not a primitive
+# cipher/hash — outside the INV-6 ban; ledger-noted in deny.toml.
+subtle = { version = "2.6.1", default-features = false }
 
 # Mirror of libsignal's own [patch.crates-io] (patches do not propagate from
 # dependencies): their audited curve25519-dalek fork. Same tag as v0.97.2.

@@ -83,6 +83,29 @@ impl AppState {
         }
     }
 
+    /// Idempotent create-at-client-specified-id (frozen §8, `PUT
+    /// /v1/mailboxes/{id}`). Returns `true` when the mailbox exists after the
+    /// call (created or already-present) — the caller returns a BYTE-IDENTICAL
+    /// response for both, so PUT is no existence oracle. Returns `false` ONLY
+    /// at the global cap, and does so REGARDLESS of whether the id already
+    /// exists (uniform capacity error at cap — no oracle; the recovery-blocked-
+    /// at-cap case is accepted and ledgered). `id` is a caller-chosen 256-bit
+    /// value; the relay never learns who chose it (INV-2).
+    pub fn put_mailbox(&self, id: &str) -> bool {
+        let mut boxes = self.boxes.lock().expect("boxes lock");
+        // At cap, refuse uniformly — do NOT branch on existence (that branch
+        // would be the oracle). An already-existing id also gets the capacity
+        // error here; recovery-blocked-at-cap is accepted (frozen §8).
+        if boxes.len() >= self.cfg.max_mailboxes {
+            return false;
+        }
+        boxes.entry(id.to_owned()).or_insert_with(|| Mailbox {
+            last_activity: Some(Instant::now()),
+            ..Mailbox::default()
+        });
+        true
+    }
+
     /// Periodic sweep: message TTL, idle-mailbox TTL, limiter hygiene.
     pub fn sweep(&self) {
         let now = Instant::now();

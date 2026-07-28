@@ -96,6 +96,25 @@ pub struct Conversation {
     pub relay_pin: Option<[u8; 32]>,
 }
 
+/// §10.7 derived-recovery state for a conversation (schema v3). `None`/0 fields
+/// mean "not a v2 recovery-capable conversation" or "not yet established".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecoveryRecord {
+    /// 0 = offerer, 1 = responder (the derived-mailbox role_label); `None` for
+    /// v1-paired conversations.
+    pub role: Option<u8>,
+    /// This side's 32-byte recovery-root contribution.
+    pub own_contrib: Option<[u8; 32]>,
+    /// The peer's 32-byte recovery-root contribution (once received).
+    pub peer_contrib: Option<[u8; 32]>,
+    /// `HMAC(A_contribution, B_contribution)` once both are known.
+    pub root: Option<[u8; 32]>,
+    /// This side's current recovery generation `g`.
+    pub own_gen: u32,
+    /// Last generation observed from a verified peer control frame.
+    pub peer_gen: u32,
+}
+
 /// An open, keyed SQLCipher store.
 pub struct Store {
     pub(crate) conn: Mutex<rusqlite::Connection>,
@@ -337,6 +356,84 @@ impl Store {
         .map_err(sql_err)
     }
 
+    /// Reads the §10.7 derived-recovery state (schema v3). All fields are
+    /// `None`/0 for a v1-paired conversation (re-pair-only).
+    pub(crate) fn recovery_state(&self, id: &[u8; 16]) -> Result<Option<RecoveryRecord>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        match conn.query_row(
+            "SELECT recovery_role, recovery_own_contrib, recovery_peer_contrib,
+                    recovery_root, recovery_own_gen, recovery_peer_gen
+             FROM conversations WHERE id = ?1",
+            [id.as_slice()],
+            |row| {
+                Ok(RecoveryRecord {
+                    role: row.get::<_, Option<i64>>(0)?.map(|r| r as u8),
+                    own_contrib: row.get::<_, Option<Vec<u8>>>(1)?.map(|v| blob32(&v)),
+                    peer_contrib: row.get::<_, Option<Vec<u8>>>(2)?.map(|v| blob32(&v)),
+                    root: row.get::<_, Option<Vec<u8>>>(3)?.map(|v| blob32(&v)),
+                    own_gen: row.get::<_, i64>(4)? as u32,
+                    peer_gen: row.get::<_, i64>(5)? as u32,
+                })
+            },
+        ) {
+            Ok(r) => Ok(Some(r)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(sql_err(e)),
+        }
+    }
+
+    /// At pairing: records this side's role and its recovery-root contribution.
+    pub(crate) fn set_recovery_pairing(
+        &self,
+        id: &[u8; 16],
+        role: u8,
+        own_contrib: &[u8; 32],
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE conversations
+               SET recovery_role = ?2, recovery_own_contrib = ?3 WHERE id = ?1",
+            rusqlite::params![id.as_slice(), role as i64, own_contrib.as_slice()],
+        )
+        .map_err(sql_err)?;
+        Ok(())
+    }
+
+    /// When the peer's contribution arrives: stores it and the derived root
+    /// (`root = HMAC(A_contribution, B_contribution)`, computed by the caller).
+    pub(crate) fn set_recovery_root(
+        &self,
+        id: &[u8; 16],
+        peer_contrib: &[u8; 32],
+        root: &[u8; 32],
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE conversations
+               SET recovery_peer_contrib = ?2, recovery_root = ?3 WHERE id = ?1",
+            rusqlite::params![id.as_slice(), peer_contrib.as_slice(), root.as_slice()],
+        )
+        .map_err(sql_err)?;
+        Ok(())
+    }
+
+    /// Persists the current recovery generation state (own, last-known peer).
+    pub(crate) fn set_recovery_generations(
+        &self,
+        id: &[u8; 16],
+        own_gen: u32,
+        peer_gen: u32,
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE conversations
+               SET recovery_own_gen = ?2, recovery_peer_gen = ?3 WHERE id = ?1",
+            rusqlite::params![id.as_slice(), own_gen as i64, peer_gen as i64],
+        )
+        .map_err(sql_err)?;
+        Ok(())
+    }
+
     /// Saves an outgoing message as `pending` (status 0). Returns its id.
     pub fn save_outgoing(
         &self,
@@ -479,4 +576,66 @@ fn blob32(v: &[u8]) -> [u8; 32] {
     let n = v.len().min(32);
     out[..n].copy_from_slice(&v[..n]);
     out
+}
+
+#[cfg(test)]
+mod v3_tests {
+    use super::*;
+
+    #[test]
+    fn schema_v3_migrates_and_recovery_state_round_trips() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(&dir.path().join("t.db"), &DbKey::generate()).expect("open");
+        assert_eq!(
+            store.schema_version().expect("version"),
+            3,
+            "schema migrates to v3"
+        );
+
+        let conv = store
+            .create_routed_conversation("peeraddr", "wss://relay/v1", None, "myinbox")
+            .expect("create conversation");
+
+        // A freshly created conversation is v1-style until recovery is set:
+        // all recovery fields NULL / 0.
+        assert_eq!(
+            store.recovery_state(&conv).expect("read").expect("row"),
+            RecoveryRecord {
+                role: None,
+                own_contrib: None,
+                peer_contrib: None,
+                root: None,
+                own_gen: 0,
+                peer_gen: 0,
+            },
+        );
+
+        // Pairing: this side records its role (offerer) + its own contribution.
+        let own = [0x11u8; 32];
+        store
+            .set_recovery_pairing(&conv, 0, &own)
+            .expect("set pairing");
+        // Peer contribution arrives → derived root persisted.
+        let peer = [0x22u8; 32];
+        let root = [0x33u8; 32];
+        store
+            .set_recovery_root(&conv, &peer, &root)
+            .expect("set root");
+        // Generation state advances.
+        store
+            .set_recovery_generations(&conv, 2, 1)
+            .expect("set generations");
+
+        assert_eq!(
+            store.recovery_state(&conv).expect("read").expect("row"),
+            RecoveryRecord {
+                role: Some(0),
+                own_contrib: Some(own),
+                peer_contrib: Some(peer),
+                root: Some(root),
+                own_gen: 2,
+                peer_gen: 1,
+            },
+        );
+    }
 }

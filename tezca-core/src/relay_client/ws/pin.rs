@@ -21,21 +21,49 @@ use tokio_rustls::client::TlsStream;
 
 use crate::{CoreError, Result};
 
+/// Builds a rustls client config that trusts exactly the pinned leaf cert
+/// (via [`PinVerifier`]). Shared by the wss connector and — under the
+/// `test-relay-anchor` feature — the reqwest HTTP client.
+pub(super) fn pinned_client_config(pin: [u8; 32]) -> Result<rustls::ClientConfig> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    Ok(
+        rustls::ClientConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .map_err(tls_err)?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(PinVerifier { pin, provider }))
+            .with_no_client_auth(),
+    )
+}
+
+/// Debug/CI-only trust anchor for the test relay (maintainer-ratified 4b-2):
+/// reads `TEZCA_TEST_RELAY_PIN` (hex SHA-256 of the relay's leaf cert DER) and
+/// anchors trust on exactly that certificate, reusing the audited
+/// [`PinVerifier`]. Compiled ONLY under the `test-relay-anchor` feature — the
+/// release .so carries neither this code nor the env-var string
+/// (asserted by scripts/check-invariants.sh). No new dependencies, no FFI
+/// surface: the instrumented harness sets the env var in-process.
+#[cfg(feature = "test-relay-anchor")]
+pub(super) fn env_test_pin() -> Option<[u8; 32]> {
+    let hex_pin = std::env::var("TEZCA_TEST_RELAY_PIN").ok()?;
+    let bytes = hex::decode(hex_pin.trim()).ok()?;
+    bytes.try_into().ok()
+}
+
 /// Establishes a TLS stream to `host` over `tcp`, honoring an optional pin.
 pub(super) async fn tls_connect(
     tcp: TcpStream,
     host: &str,
     pin: Option<[u8; 32]>,
 ) -> Result<TlsStream<TcpStream>> {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    // A per-conversation pin always wins; the test anchor only fills the
+    // no-pin (platform-trust) case, and only in test-relay-anchor builds.
+    #[cfg(feature = "test-relay-anchor")]
+    let pin = pin.or_else(env_test_pin);
     let config = match pin {
-        Some(pin) => rustls::ClientConfig::builder_with_provider(provider.clone())
-            .with_safe_default_protocol_versions()
-            .map_err(tls_err)?
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(PinVerifier { pin, provider }))
-            .with_no_client_auth(),
+        Some(pin) => pinned_client_config(pin)?,
         None => {
+            let provider = Arc::new(rustls::crypto::ring::default_provider());
             let verifier = rustls_platform_verifier::Verifier::new(provider.clone())
                 .map_err(|e| CoreError::Network(format!("platform verifier: {e}")))?;
             rustls::ClientConfig::builder_with_provider(provider)

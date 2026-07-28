@@ -104,6 +104,32 @@ pub(crate) fn migrate(conn: &rusqlite::Connection) -> Result<()> {
         .map_err(sql_err)?;
         tx.commit().map_err(sql_err)?;
     }
+
+    if current < 3 {
+        // v3 (Phase 4b-2): §10.7 derived-recovery state. All columns are
+        // NULL/0 for v1-paired conversations (which stay re-pair-only —
+        // no pairing secret, no recovery root; proto/pairing.md). recovery_role
+        // is 0=offerer / 1=responder (the derived-mailbox role_label);
+        // recovery_root = HMAC(A_contribution, B_contribution) once both are
+        // known; own/peer contributions are kept so the root can be computed
+        // when the second contribution arrives.
+        let tx = conn.unchecked_transaction().map_err(sql_err)?;
+        tx.execute_batch(
+            "ALTER TABLE conversations ADD COLUMN recovery_role INTEGER;
+             ALTER TABLE conversations ADD COLUMN recovery_own_contrib BLOB;
+             ALTER TABLE conversations ADD COLUMN recovery_peer_contrib BLOB;
+             ALTER TABLE conversations ADD COLUMN recovery_root BLOB;
+             ALTER TABLE conversations ADD COLUMN recovery_own_gen INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE conversations ADD COLUMN recovery_peer_gen INTEGER NOT NULL DEFAULT 0;",
+        )
+        .map_err(sql_err)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (3, unixepoch())",
+            [],
+        )
+        .map_err(sql_err)?;
+        tx.commit().map_err(sql_err)?;
+    }
     Ok(())
 }
 

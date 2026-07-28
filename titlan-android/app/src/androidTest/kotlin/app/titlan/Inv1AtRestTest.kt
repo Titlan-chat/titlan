@@ -31,7 +31,14 @@ class Inv1AtRestTest {
     @Test
     fun noPlaintextAtRestAfterIdentityCreation() {
         val key = DbKeyManager(context).getOrCreateDbKey()
-        val dbFile = File(context.filesDir, "titlan.db")
+        // This suite's OWN store, not the shared AppCore filesDir/titlan.db:
+        // AppCore keeps one process-wide connection to that file open for the
+        // whole run, so opening/creating it here would race that connection, and
+        // a reset elsewhere unlinking it triggers SQLITE_READONLY_DBMOVED (CI
+        // #64–#66; ~/4b2-readonly-invest.md). The at-rest property is identical
+        // for any core-opened SQLCipher store; cacheDir is one of the walked
+        // at-rest roots below.
+        val dbFile = File(context.cacheDir, "inv1-atrest.db").also { it.delete() }
 
         // relay.invalid: config-only placeholder (RFC 2606); open() makes no
         // connection in 4b-1, and the real default stays in core (INV-5).

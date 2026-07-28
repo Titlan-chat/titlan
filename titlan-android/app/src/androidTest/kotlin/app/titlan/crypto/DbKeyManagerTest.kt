@@ -35,13 +35,15 @@ class DbKeyManagerTest {
 
     @Before
     fun freshState() {
-        // Reset key AND DB state coherently (run 29613625849: key-only
-        // resets leave a stale SQLCipher DB under the old key for any
-        // later test that opens it).
-        for (name in listOf(
-            "titlan.db", "titlan.db-journal", "titlan.db-wal", "titlan.db-shm",
-            DbKeyManager.WRAP_FILE, "${DbKeyManager.WRAP_FILE}.tmp",
-        )) {
+        // Reset ONLY this suite's key state — the wrap blob and the Keystore
+        // wrapping key. This suite never opens titlan.db, so it must NOT delete
+        // it: AppCore keeps one process-wide SQLCipher connection to
+        // filesDir/titlan.db open for the whole instrumented run, and unlinking
+        // that file under the live connection makes the next write through it
+        // fail SQLITE_READONLY_DBMOVED (CI #64–#66; ~/4b2-readonly-invest.md).
+        // The old stale-DB-under-old-key concern is gone: no test opens the
+        // shared titlan.db with a freshly reset key (each uses its own store).
+        for (name in listOf(DbKeyManager.WRAP_FILE, "${DbKeyManager.WRAP_FILE}.tmp")) {
             File(context.filesDir, name).delete()
         }
         KeyStore.getInstance("AndroidKeyStore").apply {

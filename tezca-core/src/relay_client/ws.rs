@@ -115,3 +115,19 @@ impl Subscription {
 pub(crate) fn install_ring_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
+
+/// Builds the engine's reqwest client. In `test-relay-anchor` builds with
+/// `TEZCA_TEST_RELAY_PIN` set, https:// requests trust exactly the pinned
+/// test-relay certificate (same [`pin`] verifier as the wss leg); otherwise
+/// this is a stock client and release builds compile the anchor path out.
+pub(crate) fn build_http_client() -> Result<reqwest::Client> {
+    let builder = reqwest::Client::builder();
+    #[cfg(feature = "test-relay-anchor")]
+    let builder = match pin::env_test_pin() {
+        Some(p) => builder.use_preconfigured_tls(pin::pinned_client_config(p)?),
+        None => builder,
+    };
+    builder
+        .build()
+        .map_err(|e| CoreError::Network(e.to_string()))
+}

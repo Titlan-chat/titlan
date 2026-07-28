@@ -36,8 +36,10 @@ pub fn retry_after_secs() -> u64 {
 
 struct Window {
     minute: u64,
-    count_a: u32,
-    count_b: u32,
+    /// Independent per-window counters for the distinct request classes on a
+    /// key (source: create/put/deposit; mailbox: deposit/ws). Kept in one
+    /// window so a minute rollover resets them together.
+    counts: [u32; 3],
     touched: Instant,
 }
 
@@ -45,24 +47,19 @@ impl Window {
     fn fresh(minute: u64) -> Self {
         Window {
             minute,
-            count_a: 0,
-            count_b: 0,
+            counts: [0; 3],
             touched: Instant::now(),
         }
     }
 
-    /// Increments counter `a`/`b` for this window; true if within `limit`.
-    fn admit(&mut self, use_a: bool, limit: u32) -> bool {
+    /// Increments counter `slot` for this window; true if within `limit`.
+    fn admit(&mut self, slot: usize, limit: u32) -> bool {
         let minute = current_minute();
         if self.minute != minute {
             *self = Window::fresh(minute);
         }
         self.touched = Instant::now();
-        let count = if use_a {
-            &mut self.count_a
-        } else {
-            &mut self.count_b
-        };
+        let count = &mut self.counts[slot];
         if *count >= limit {
             return false;
         }
@@ -77,6 +74,7 @@ pub struct SourceLimiter {
     hasher: RandomState,
     map: Mutex<HashMap<u64, Window>>,
     create_limit: u32,
+    put_limit: u32,
     deposit_limit: u32,
     idle: std::time::Duration,
     max_entries: usize,
@@ -88,6 +86,7 @@ impl SourceLimiter {
             hasher: RandomState::new(),
             map: Mutex::new(HashMap::new()),
             create_limit: cfg.rate_create_per_min,
+            put_limit: cfg.rate_put_per_min_source,
             deposit_limit: cfg.rate_deposit_per_min_source,
             idle: cfg.limiter_idle,
             max_entries: cfg.limiter_max_sources,
@@ -102,7 +101,7 @@ impl SourceLimiter {
         self.hasher.hash_one(&coarse)
     }
 
-    fn admit(&self, ip: IpAddr, use_a: bool, limit: u32) -> bool {
+    fn admit(&self, ip: IpAddr, slot: usize, limit: u32) -> bool {
         if limit == 0 {
             return false;
         }
@@ -119,15 +118,19 @@ impl SourceLimiter {
         }
         map.entry(key)
             .or_insert_with(|| Window::fresh(current_minute()))
-            .admit(use_a, limit)
+            .admit(slot, limit)
     }
 
     pub fn admit_create(&self, ip: IpAddr) -> bool {
-        self.admit(ip, true, self.create_limit)
+        self.admit(ip, 0, self.create_limit)
+    }
+
+    pub fn admit_put(&self, ip: IpAddr) -> bool {
+        self.admit(ip, 2, self.put_limit)
     }
 
     pub fn admit_deposit(&self, ip: IpAddr) -> bool {
-        self.admit(ip, false, self.deposit_limit)
+        self.admit(ip, 1, self.deposit_limit)
     }
 
     pub fn prune(&self, now: Instant) {
@@ -156,7 +159,7 @@ impl BoxLimiter {
         }
     }
 
-    fn admit(&self, mailbox: &str, use_a: bool, limit: u32) -> bool {
+    fn admit(&self, mailbox: &str, slot: usize, limit: u32) -> bool {
         if limit == 0 {
             return false;
         }
@@ -165,15 +168,15 @@ impl BoxLimiter {
             .expect("limiter lock")
             .entry(mailbox.to_owned())
             .or_insert_with(|| Window::fresh(current_minute()))
-            .admit(use_a, limit)
+            .admit(slot, limit)
     }
 
     pub fn admit_deposit(&self, mailbox: &str) -> bool {
-        self.admit(mailbox, true, self.deposit_limit)
+        self.admit(mailbox, 0, self.deposit_limit)
     }
 
     pub fn admit_ws(&self, mailbox: &str) -> bool {
-        self.admit(mailbox, false, self.ws_limit)
+        self.admit(mailbox, 1, self.ws_limit)
     }
 
     pub fn prune(&self, now: Instant) {

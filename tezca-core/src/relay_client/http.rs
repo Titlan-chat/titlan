@@ -79,6 +79,42 @@ pub(crate) async fn deposit(
     })
 }
 
+/// Outcome of a `PUT /v1/mailboxes/{id}` create-at-id (frozen §8).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PutOutcome {
+    /// 201 — the mailbox exists after the call (created or already present).
+    Created,
+    /// 503 — global capacity reached (recovery-blocked-at-cap; accepted).
+    AtCap,
+    /// 429 — per-source pacing. During recovery this is a PACING signal and
+    /// MUST NOT count toward exhaustion (frozen §8).
+    RateLimited,
+    /// Any other non-success status.
+    Other(u16),
+}
+
+/// PUT-creates a mailbox at a client-specified 256-bit id (idempotent, §8).
+/// Used before subscribing to an own derived inbox and before depositing into a
+/// peer derived inbox (deposit/subscribe both 404 on unknown ids, never create).
+pub(crate) async fn put_mailbox(
+    client: &Client,
+    relay_url: &str,
+    mailbox_id: &str,
+) -> Result<PutOutcome> {
+    let base = to_http(relay_url);
+    let resp = client
+        .put(format!("{base}/v1/mailboxes/{mailbox_id}"))
+        .send()
+        .await
+        .map_err(net_err)?;
+    Ok(match resp.status().as_u16() {
+        201 => PutOutcome::Created,
+        503 => PutOutcome::AtCap,
+        429 => PutOutcome::RateLimited,
+        other => PutOutcome::Other(other),
+    })
+}
+
 /// Retires (deletes) a mailbox. Best-effort: a 404 is already the goal state.
 pub(crate) async fn delete_mailbox(
     client: &Client,

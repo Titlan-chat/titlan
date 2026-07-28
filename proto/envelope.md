@@ -58,9 +58,10 @@ cryptographic operation runs (`PayloadTooLarge`).
 | `0x02` | `posture` | **first-class reserved** — Tezca suite |
 | `0x03` | `policy` | **first-class reserved** — Tezca suite |
 | `0x04` | `alert` | **first-class reserved** — Tezca suite |
-| `0x05` | `pair-ack` | pairing control (Phase 4a): scanner's reply coordinates — see `pairing.md` |
-| `0x06` | `mailbox-update` | pairing control (Phase 4a): one-sided inbox recovery — see `pairing.md` |
-| `0x07–0x7F` | — | unassigned; allocation requires an entry here |
+| `0x05` | `pair-ack` | pairing control: reply coordinates (`pair-ack/1` Phase 4a; `pair-ack/2` proof-of-scan Phase 4b-2) — see `pairing.md` / `inner-frame.md` |
+| `0x06` | `mailbox-update` | pairing/recovery control: inbox recovery + rotation/handoff (`/1` Phase 4a; `/2` pairing handoff, `/3` recovery rotation, Phase 4b-2) — see `inner-frame.md` |
+| `0x07` | `recovery-hello` | §10.7 recovery probe (Phase 4b-2, maintainer-assigned 2026-07-19) — see `inner-frame.md` |
+| `0x08–0x7F` | — | unassigned; allocation requires an entry here |
 | `0x80–0xFF` | — | private/experimental; never allocated by this registry |
 
 `0x05` (`pair-ack`) and `0x06` (`mailbox-update`) were **assigned by the
