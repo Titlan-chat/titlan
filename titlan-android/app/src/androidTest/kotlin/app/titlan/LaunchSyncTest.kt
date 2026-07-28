@@ -9,9 +9,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.titlan.core.AppCore
 import app.titlan.core.CoreClient
 import app.titlan.core.CoreClientFactory
+import app.titlan.sync.ConnectionState
 import app.titlan.sync.SyncController
+import app.titlan.sync.SyncEvents
 import java.io.File
 import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -56,10 +59,22 @@ class LaunchSyncTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
-    /** Leave the shared process clean for the next test in the suite. */
+    /**
+     * Leave the shared process clean for the next test in the suite. This is
+     * a REAL core stop (4b2-WO-stop-sync): `SyncController.stop` invokes
+     * `stopSync` over the FFI, which cancels and JOINS every core listener
+     * task before returning — so when this teardown returns, no sync task is
+     * running. The second stop asserts the S2 idempotency contract across the
+     * FFI: double-stop is a clean no-op.
+     */
     @After
     fun tearDown() {
         SyncController.stop(context)
+        assertFalse(
+            "stop must leave sync not running",
+            SyncController.isRunning(context),
+        )
+        SyncController.stop(context) // S2: double-stop is a clean no-op
     }
 
     private fun freshKey(): ByteArray = ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -105,6 +120,68 @@ class LaunchSyncTest {
             assertTrue(
                 "cold launch with a paired conversation must start SyncService",
                 await(20_000) { SyncController.isRunning(context) },
+            )
+        }
+    }
+
+    /**
+     * 4b2-WO-stop-sync T4 (CI-graded): the teardown path's core stop is REAL.
+     * After `SyncController.stop`, a peer deposit is NOT delivered while
+     * stopped (no `onMessageArrived`; core acks only after persist, so the
+     * undelivered blob stays un-acked at the relay), and a subsequent core
+     * start delivers it — relay redelivery of the un-acked blob, the S3
+     * contract observed across the FFI. Counts are baselined against the
+     * pre-stop value so stale un-acked deposits from earlier tests in this
+     * shared process cannot pollute the graded window. Existing event
+     * vocabulary only ([SyncEvents]); no new probes.
+     */
+    @Test
+    fun stopSyncHaltsCoreDeliveryUntilRestart() {
+        val core = AppCore.get()
+        if (!core.isInitialized()) core.initializeIdentity()
+        val peerDb = File(context.cacheDir, "stop-sync-peer.db").also { it.delete() }
+        val offer = core.exportPairingOffer()
+        CoreClientFactory.open(peerDb.path, freshKey(), BuildConfig.RELAY_URL).use { peer ->
+            peer.initializeIdentity()
+            val convPeer = peer.beginPairingFromOffer(offer)
+
+            val arrived = AtomicInteger(0)
+            val recorder = object : SyncEvents {
+                override fun onMessageArrived(conversationId: ByteArray, messageId: ByteArray) {
+                    arrived.incrementAndGet()
+                }
+                override fun onConnectionState(
+                    conversationId: ByteArray,
+                    relayEndpoint: String,
+                    state: ConnectionState,
+                ) = Unit
+                override fun onConversationNeedsRepair(conversationId: ByteArray) = Unit
+                override fun onPermanentSendFailure(
+                    conversationId: ByteArray,
+                    messageId: ByteArray,
+                ) = Unit
+                override fun onStorageError(detail: String) = Unit
+            }
+
+            core.startSync(recorder)
+            // Drain window: let stale redeliveries from earlier suite tests land.
+            Thread.sleep(1_000)
+
+            SyncController.stop(context) // the production teardown path under test
+            val baseline = arrived.get()
+            peer.sendChat(convPeer, "deposited-while-stopped")
+
+            // Graded halt observable (red signature): nothing arrives while stopped.
+            assertFalse(
+                "a deposit after core stop must NOT be delivered while stopped",
+                await(3_000) { arrived.get() > baseline },
+            )
+
+            // S3 closed end-to-end: the un-acked blob redelivers on restart.
+            core.startSync(recorder)
+            assertTrue(
+                "the un-acked deposit must be redelivered on restart",
+                await(20_000) { arrived.get() > baseline },
             )
         }
     }

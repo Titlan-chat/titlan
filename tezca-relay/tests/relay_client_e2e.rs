@@ -584,3 +584,220 @@ fn wait_until(mut cond: impl FnMut() -> bool) {
     }
     panic!("condition not met within timeout");
 }
+
+/// Asserts `holds` continuously for ~`ms` (checked every 50 ms) — the bounded
+/// negative observation used by the 4b2-WO-stop-sync tests ("nothing arrives
+/// while stopped"). A bounded window is the strongest negative a black-box
+/// test can state; the matching positive (redelivery after restart) closes
+/// the loop end-to-end.
+fn assert_quiet_for_ms(ms: u64, mut holds: impl FnMut() -> bool, what: &str) {
+    for _ in 0..(ms / 50) {
+        assert!(holds(), "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(holds(), "{what}");
+}
+
+/// 4b2-WO-stop-sync T1: after `stop_sync` the receive loop is provably
+/// halted — a blob deposited post-stop is not delivered (and therefore not
+/// acked: core acks only after handle+persist, so an undelivered blob is an
+/// un-acked blob), and a subsequent `start_sync` delivers exactly that blob —
+/// the relay redelivering the un-acked deposit is the S3 contract observed
+/// end-to-end.
+#[test]
+fn stop_sync_halts_receive_and_unacked_blob_redelivers_on_restart() {
+    let dir = TempDir::new().unwrap();
+    let (relay, _d) = {
+        let d = TempDir::new().unwrap();
+        let p = free_port();
+        (spawn_relay_at(p, GENEROUS_LIMITS, d.path()), d)
+    };
+    let url = format!("ws://{}", relay.base());
+
+    let alice = new_client(&dir, "alice.db", &url);
+    let bob = new_client(&dir, "bob.db", &url);
+    let alice_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+
+    // Live baseline: sync delivers while running.
+    bob.send_chat(&conv_b, "live-before-stop").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"live-before-stop".to_string()));
+
+    alice.stop_sync().expect("stop_sync");
+
+    // Deposit lands relay-side regardless of the receiver's sync state.
+    bob.send_chat(&conv_b, "deposited-while-stopped").unwrap();
+    assert_quiet_for_ms(
+        2_000,
+        || {
+            !alice_rx
+                .texts()
+                .contains(&"deposited-while-stopped".to_string())
+        },
+        "a blob deposited after stop_sync must NOT be delivered while stopped",
+    );
+
+    // Restart: the un-acked blob is redelivered and now arrives.
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    wait_until(|| {
+        alice_rx
+            .texts()
+            .contains(&"deposited-while-stopped".to_string())
+    });
+}
+
+/// 4b2-WO-stop-sync T2 (S2 lifecycle): stop-before-start is Ok, double-stop is
+/// Ok, start-after-stop starts cleanly, and after the final stop the loop is
+/// halted. Task completion is asserted through the stop contract itself: the
+/// green `stop_sync` is a JOINED stop (returns only after every listener task
+/// finished — the join happens inside core, where the runtime handle lives),
+/// so each `expect` here doubles as the no-leaked-task assertion.
+#[test]
+fn stop_sync_lifecycle_is_idempotent_and_restartable() {
+    let dir = TempDir::new().unwrap();
+    let (relay, _d) = {
+        let d = TempDir::new().unwrap();
+        let p = free_port();
+        (spawn_relay_at(p, GENEROUS_LIMITS, d.path()), d)
+    };
+    let url = format!("ws://{}", relay.base());
+
+    let alice = new_client(&dir, "alice.db", &url);
+    let bob = new_client(&dir, "bob.db", &url);
+
+    // S2: stop before any start — twice — is Ok and does nothing.
+    alice.stop_sync().expect("stop before start must be Ok");
+    alice
+        .stop_sync()
+        .expect("double stop before start must be Ok");
+
+    let alice_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    bob.send_chat(&conv_b, "cycle-1").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"cycle-1".to_string()));
+
+    // S2: stop after start, twice (idempotent).
+    alice.stop_sync().expect("first stop must be Ok");
+    alice
+        .stop_sync()
+        .expect("second stop must be Ok (idempotent)");
+
+    // S2: start-after-stop starts cleanly on a fresh generation.
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.send_chat(&conv_b, "cycle-2").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"cycle-2".to_string()));
+
+    // Final stop halts the loop for real (the red->green observable).
+    alice.stop_sync().expect("final stop must be Ok");
+    bob.send_chat(&conv_b, "post-final-stop").unwrap();
+    assert_quiet_for_ms(
+        1_500,
+        || !alice_rx.texts().contains(&"post-final-stop".to_string()),
+        "after the final stop the receive loop must be halted",
+    );
+}
+
+/// 4b2-WO-stop-sync T3 (S3 under adversarial timing): stop is issued while a
+/// delivery may be mid-pipeline, across jittered interleavings; in every one,
+/// no ack-without-persist occurs.
+///
+/// What this test CAN force: coarse interleavings — the stop racing the
+/// deposit/deliver pipeline at millisecond granularity, including "stop lands
+/// before subscribe wakes", "stop lands while the message is in flight", and
+/// "stop lands after delivery".
+/// What it CANNOT force: a cancellation point INSIDE the persist→ack span —
+/// by construction the green listener checks cancellation only BETWEEN
+/// messages, so no such interleaving exists to schedule (that structural
+/// argument lives in `conversation_listener`; this test grades its observable
+/// consequence).
+/// Graded observable per round: after stop returns, nothing further arrives
+/// while stopped (a real, joined stop); after restart the round's message is
+/// in the store EXACTLY once — an ack-without-persist would leave it at zero
+/// forever (the relay would never redeliver an acked blob), and a
+/// double-persist would leave two.
+#[test]
+fn ack_after_persist_holds_across_stop_in_raced_interleavings() {
+    let dir = TempDir::new().unwrap();
+    let (relay, _d) = {
+        let d = TempDir::new().unwrap();
+        let p = free_port();
+        (spawn_relay_at(p, GENEROUS_LIMITS, d.path()), d)
+    };
+    let url = format!("ws://{}", relay.base());
+
+    let alice = new_client(&dir, "alice.db", &url);
+    let bob = new_client(&dir, "bob.db", &url);
+    let alice_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    bob.send_chat(&conv_b, "race-live").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"race-live".to_string()));
+    let conv_a = alice.list_conversations().unwrap()[0];
+
+    for (round, jitter_ms) in [0u64, 3, 7, 12, 20, 35, 60, 100].into_iter().enumerate() {
+        let text = format!("race-{round}");
+        bob.send_chat(&conv_b, &text).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(jitter_ms));
+        alice.stop_sync().expect("stop mid-race");
+
+        // A real (joined) stop means: whatever had not been delivered by the
+        // time stop_sync returned stays undelivered until restart.
+        let seen = alice_rx
+            .texts()
+            .iter()
+            .filter(|t| t.as_str() == text)
+            .count();
+        assert_quiet_for_ms(
+            500,
+            || {
+                alice_rx
+                    .texts()
+                    .iter()
+                    .filter(|t| t.as_str() == text)
+                    .count()
+                    == seen
+            },
+            "no delivery may occur after stop_sync returned",
+        );
+
+        alice
+            .start_sync(Arc::new(States::default()), alice_rx.clone())
+            .unwrap();
+        let in_store = || {
+            alice
+                .messages(&conv_a)
+                .unwrap()
+                .iter()
+                .filter(|m| m.body == text.as_bytes())
+                .count()
+        };
+        wait_until(|| in_store() >= 1);
+        assert_eq!(
+            in_store(),
+            1,
+            "exactly-once after restart (S3: no ack-without-persist, no duplicate)"
+        );
+    }
+    alice.stop_sync().expect("final stop");
+}
