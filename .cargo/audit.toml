@@ -9,7 +9,9 @@
 ignore = [
     # Mirrors deny.toml [advisories] ignores — deny.toml carries the full
     # per-advisory rationale blocks and is the single source of truth.
-    # Approved 2026-07-18. RE-EVALUATE BY 2026-08-18 and at every libsignal
-    # release; remove here and in deny.toml together via the §10.2 lockstep
-    # libsignal bump.
+    # 2026-07-29: RUSTSEC-2026-0207/-0208/-0212 (approved 2026-07-18)
+    # discharged by the §10.2 lockstep libsignal bump to v0.99.1
+    # (libcrux-sha3 0.0.10 / libcrux-secrets 0.0.6); nothing to mirror at
+    # present. RUSTSEC-2026-0173 (unmaintained warning) does not fail
+    # cargo audit and is ignored in deny.toml only.
 ]

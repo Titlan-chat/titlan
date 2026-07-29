@@ -89,6 +89,9 @@ autonomously.
   public API, must never be bumped independently — they move only in lockstep
   with a libsignal bump, verified against the RNG trait bounds in
   identity/session key generation. See work-order §10.2 ledger.
+- deny.toml duplicate-skips are version-pinned and ledgered with convergence
+  conditions; every libsignal bump re-checks and deletes converged skips.
+  (Adopted 2026-07-29.)
 
 ## Standing constraints (enforced by CI — see DEVELOPMENT.md)
 
