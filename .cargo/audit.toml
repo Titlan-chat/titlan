@@ -12,7 +12,4 @@ ignore = [
     # Approved 2026-07-18. RE-EVALUATE BY 2026-08-18 and at every libsignal
     # release; remove here and in deny.toml together via the §10.2 lockstep
     # libsignal bump.
-    "RUSTSEC-2026-0207",
-    "RUSTSEC-2026-0208",
-    "RUSTSEC-2026-0212",
 ]
