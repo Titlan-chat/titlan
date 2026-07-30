@@ -34,3 +34,6 @@
 *.keystore
 *.jks
 *.pepk
+
+# Locally generated harness TLS material; must never be committed
+/relay-certs/

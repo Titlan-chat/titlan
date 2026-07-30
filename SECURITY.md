@@ -3,19 +3,24 @@
 
 # Security Policy
 
+## Supported versions
+
+Titlan is pre-release: there are no supported releases yet, and `main` is a
+moving pre-release target. Security reports against `main` are welcome.
+
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately — do not open a public
 issue.
 
-- Contact: **oculuxsectech@gmail.com**
-  <!-- TODO: switch to security@<final Titlan domain> once the domain is
-       secured (work order §10.4), and publish a PGP key. -->
+- Contact: **security@titlan.chat**
+- GitHub Private Vulnerability Reporting on this repository is also an
+  accepted reporting channel.
 - Include: affected component (`tezca-core`, `tezca-relay`,
   `titlan-android`), version or commit, reproduction steps, and impact
   assessment if you have one.
 
-## Response SLA (placeholder — to be confirmed before first release)
+## Response SLA
 
 - Acknowledgement: within 3 business days
 - Initial assessment: within 10 business days

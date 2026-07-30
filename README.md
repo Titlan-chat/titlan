@@ -14,6 +14,11 @@ Oculux Technologies LLC.
 (libsignal), and encrypted storage are in place with full test coverage; the
 relay server and Android UI are still to come.
 
+> **Protocol status: NOT frozen.** The wire protocol and pairing formats are
+> not frozen until the Phase 5 protocol specification is published. Do not
+> build compatible clients against `main` yet — formats may change without
+> notice until then.
+
 Titlan is built with an AI-assisted, human-gated development process — see
 [DEVELOPMENT.md](DEVELOPMENT.md) for exactly how, and why we publish that.
 

@@ -15,9 +15,9 @@ serialized by libsignal (INV-6); this format is pure framing.
 | field | encoding |
 |---|---|
 | format_version | u8 = `0x01`; unknown ⇒ reject |
-| address_name | u16 len + UTF-8 (local pairing pseudonym: 32 lowercase hex chars = 16 random bytes, generated once at identity initialization) |
+| address_name | u16 len + UTF-8 (local pairing pseudonym: the lowercase hex encoding of the 33-byte serialized identity public key — 66 hex characters; see §Address derivation below) |
 | registration_id | u32 |
-| device_id | u32 = 1 in MVP |
+| device_id | u32; in protocol v1 MUST be 1 — any other value ⇒ reject (malformed) |
 | identity_key | u16 len + libsignal-serialized public key |
 | signed_prekey_id | u32 |
 | signed_prekey_pub | u16 len + bytes |
@@ -29,8 +29,9 @@ serialized by libsignal (INV-6); this format is pure framing.
 | onetime_prekey_pub | u16 len + bytes; len 0 when absent |
 
 Receiver rules: reject unknown `format_version`, any truncation, and any
-trailing bytes after the last field. Identity keys received here are recorded
-as TOFU (trust-on-first-use) identities; key-change handling and safety
+trailing bytes after the last field. In protocol v1, `device_id` MUST be 1;
+parsers MUST reject any other value as malformed. Identity keys received here
+are recorded as TOFU (trust-on-first-use) identities; key-change handling and safety
 numbers are post-MVP (directory/key-transparency deferred per A7).
 
 Privacy note (threat model, Phase 5): the first message(s) of a session are
