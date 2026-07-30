@@ -171,6 +171,14 @@ skip = [
     # shlex 1.3 via bindgen (same valgrind path); cc's shlex is 2.x.
     # Converges when that path leaves the lockfile or bindgen catches up:
     { name = "shlex", version = "=1.3.0" },
+    # 2026-07-30 (PR #26 adoption, ratification R1): old-generation syn
+    # held by the proc-macro-error2 (RUSTSEC-2026-0173 unmaintained
+    # cluster) / hax chain inside libsignal's build tree, plus bindgen
+    # (the valgrind path above) and the other syn-2 macro consumers; the
+    # new syn 3 arrives via thiserror-impl 2.0.19 / async-trait 0.1.91.
+    # Converges when proc-macro-error2 leaves the tree or that chain
+    # adopts syn 3 — same exit event as the 0173 ignore:
+    { name = "syn", version = "=2.0.118" },
 ]
 wildcards = "deny"
 # Our own unpublished workspace crates are consumed by path (no version);
