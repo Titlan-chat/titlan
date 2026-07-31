@@ -60,6 +60,12 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<BundleData> {
         .map_err(|_| CoreError::Malformed("bundle address is not UTF-8"))?;
     let registration_id = cursor.u32()?;
     let device_id = cursor.u32()?;
+    if device_id != 1 {
+        // v1 conformance (freeze §H2.2): the u32 field is wire headroom, but
+        // protocol v1 admits exactly device_id 1 — anything else is rejected
+        // at parse time, fail-closed, before any session state is touched.
+        return Err(CoreError::Malformed("unsupported device id in v1"));
+    }
     let identity_key = cursor.bytes_field()?.to_vec();
     let signed_prekey_id = cursor.u32()?;
     let signed_prekey_pub = cursor.bytes_field()?.to_vec();
@@ -122,6 +128,9 @@ pub(crate) fn parse_mailbox_update(bytes: &[u8]) -> Result<(String, String)> {
     }
     let relay_url = utf8(c.bytes_field()?)?;
     let inbox_id = utf8(c.take(MAILBOX_ID_LEN)?)?;
+    if c.pos != bytes.len() {
+        return Err(CoreError::Malformed("trailing bytes in mailbox-update/1"));
+    }
     Ok((relay_url, inbox_id))
 }
 
@@ -674,5 +683,54 @@ mod v2_tests {
             "pinned onetime id"
         );
         assert_eq!(data.kyber_prekey_pub.len(), 1569, "kyber pub length");
+    }
+}
+
+#[cfg(test)]
+mod v1_conformance_tests {
+    use super::*;
+
+    fn bundle_with_device_id(device_id: u32) -> BundleData {
+        let mut identity_key = vec![0x11u8; 33];
+        identity_key[0] = 0x05; // libsignal EC point type byte — shape realism only
+        BundleData {
+            address_name: "a".repeat(66),
+            registration_id: 0x1234,
+            device_id,
+            identity_key,
+            signed_prekey_id: 7,
+            signed_prekey_pub: vec![0x22; 33],
+            signed_prekey_sig: vec![0x33; 64],
+            kyber_prekey_id: 9,
+            kyber_prekey_pub: vec![0x44; 1569],
+            kyber_prekey_sig: vec![0x55; 64],
+            onetime_prekey: Some((2, vec![0x66; 33])),
+        }
+    }
+
+    // 18a (freeze §H2.2, proto/pairing.md receiver rule): in protocol v1 the
+    // bundle's device_id MUST be 1; parsers MUST reject any other value as
+    // malformed.
+    #[test]
+    fn bundle_with_device_id_other_than_1_is_malformed() {
+        match parse(&serialize(&bundle_with_device_id(2))) {
+            Err(CoreError::Malformed(_)) => {}
+            Err(other) => panic!("expected Malformed, got Err({other:?})"),
+            Ok(_) => panic!("expected Malformed, got Ok(..)"),
+        }
+    }
+
+    // 18d: a mailbox-update/1 payload with trailing bytes after the fixed
+    // 43-char inbox id must be rejected, symmetric with /2 and /3.
+    #[test]
+    fn mailbox_update_v1_with_trailing_bytes_is_malformed() {
+        let inbox = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 43 chars
+        let mut payload = encode_mailbox_update("wss://relay.example/v1", inbox);
+        payload.extend_from_slice(&[0xDE, 0xAD]);
+        match parse_mailbox_update(&payload) {
+            Err(CoreError::Malformed(_)) => {}
+            Err(other) => panic!("expected Malformed, got Err({other:?})"),
+            Ok(ok) => panic!("expected Malformed, got Ok({ok:?})"),
+        }
     }
 }

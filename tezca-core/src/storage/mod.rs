@@ -639,3 +639,156 @@ mod v3_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod v1_to_v3_migration_tests {
+    use super::*;
+
+    /// 18c: a POPULATED, genuine v1-schema database (v1 DDL with
+    /// `schema_migrations` recording exactly version 1) opened through the
+    /// production `Store::open` path migrates to v3 with every pre-existing
+    /// row intact and the v3 columns present at their defaults. The earlier
+    /// migration tests only ever ran the chain against an empty file.
+    #[test]
+    fn populated_v1_database_migrates_to_v3_preserving_rows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("v1.db");
+        let key = DbKey::generate();
+        let conv_id: [u8; 16] = std::array::from_fn(|i| i as u8);
+        let msg_id = [0xEEu8; 16];
+
+        // Build the v1 database exactly as Phase 2 created it: a keyed
+        // SQLCipher connection, the migration-mechanism table, the v1 DDL,
+        // and the version-1 record — then populate one row per table.
+        {
+            let conn = rusqlite::Connection::open(&path).expect("open raw v1 db");
+            let mut key_hex = hex::encode(key.as_bytes());
+            let pragma = format!("PRAGMA key = \"x'{key_hex}'\";");
+            conn.execute_batch(&pragma).expect("key the connection");
+            key_hex.zeroize();
+            conn.execute_batch(
+                "CREATE TABLE schema_migrations (
+                   version INTEGER PRIMARY KEY,
+                   applied_at INTEGER NOT NULL
+                 );",
+            )
+            .expect("migration-mechanism table");
+            conn.execute_batch(schema::V1_DDL).expect("v1 ddl");
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (1, unixepoch())",
+                [],
+            )
+            .expect("record version 1");
+
+            conn.execute(
+                "INSERT INTO local_identity
+                   (id, address_name, registration_id, identity_keypair, created_at)
+                 VALUES (1, 'addr-v1', 42, x'0102', unixepoch())",
+                [],
+            )
+            .expect("local_identity row");
+            conn.execute(
+                "INSERT INTO sessions (address, device_id, record, updated_at)
+                 VALUES ('peer-a', 1, x'AA', unixepoch())",
+                [],
+            )
+            .expect("sessions row");
+            conn.execute(
+                "INSERT INTO identities (address, identity_key, trusted_at)
+                 VALUES ('peer-a', x'BB', unixepoch())",
+                [],
+            )
+            .expect("identities row");
+            conn.execute(
+                "INSERT INTO conversations
+                   (id, peer_address, relay_url, mailbox_send, mailbox_recv, created_at)
+                 VALUES (?1, 'peer-a', 'wss://r.example/v1', 'sendbox', 'recvbox', unixepoch())",
+                [conv_id.as_slice()],
+            )
+            .expect("conversations row");
+            conn.execute(
+                "INSERT INTO messages
+                   (id, conversation_id, direction, payload_type, type_version, body, status)
+                 VALUES (?1, ?2, 1, 1, 1, x'686921', 2)",
+                rusqlite::params![msg_id.as_slice(), conv_id.as_slice()],
+            )
+            .expect("messages row");
+
+            // The pre-state is verifiably version 1 before Store::open runs.
+            let v: u32 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("read version");
+            assert_eq!(v, 1, "pre-state must be schema v1");
+        }
+
+        // Production open path: v2 and v3 migrations run here.
+        let store = Store::open(&path, &key).expect("open migrated store");
+        assert_eq!(store.schema_version().expect("version"), 3);
+
+        // Every pre-existing row survives intact.
+        assert_eq!(
+            crate::identity::local_address(&store).expect("local address"),
+            "addr-v1"
+        );
+        let convo = store
+            .get_conversation(&conv_id)
+            .expect("read conversation")
+            .expect("conversation row survives");
+        assert_eq!(convo.peer_address, "peer-a");
+        assert_eq!(convo.relay_url, "wss://r.example/v1");
+        assert_eq!(convo.mailbox_send.as_deref(), Some("sendbox"));
+        assert_eq!(convo.mailbox_recv.as_deref(), Some("recvbox"));
+        assert_eq!(convo.relay_pin, None, "v2 column defaults to NULL");
+        let messages = store.list_messages(&conv_id).expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, msg_id);
+        assert_eq!(messages[0].direction, Direction::Incoming);
+        assert_eq!(messages[0].payload_type, 1);
+        assert_eq!(messages[0].type_version, 1);
+        assert_eq!(messages[0].body, b"hi!".to_vec());
+        {
+            let conn = store.conn.lock().expect("store mutex poisoned");
+            let (regid, keypair): (u32, Vec<u8>) = conn
+                .query_row(
+                    "SELECT registration_id, identity_keypair FROM local_identity WHERE id = 1",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("local_identity survives");
+            assert_eq!((regid, keypair), (42, vec![0x01, 0x02]));
+            let session_record: Vec<u8> = conn
+                .query_row(
+                    "SELECT record FROM sessions WHERE address = 'peer-a' AND device_id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("sessions row survives");
+            assert_eq!(session_record, vec![0xAA]);
+            let identity_key: Vec<u8> = conn
+                .query_row(
+                    "SELECT identity_key FROM identities WHERE address = 'peer-a'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("identities row survives");
+            assert_eq!(identity_key, vec![0xBB]);
+        }
+
+        // The v3 columns exist at their defaults for the pre-existing row.
+        assert_eq!(
+            store.recovery_state(&conv_id).expect("read").expect("row"),
+            RecoveryRecord {
+                role: None,
+                own_contrib: None,
+                peer_contrib: None,
+                root: None,
+                own_gen: 0,
+                peer_gen: 0,
+            },
+        );
+    }
+}

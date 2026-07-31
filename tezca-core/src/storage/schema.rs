@@ -6,7 +6,7 @@
 
 use crate::{CoreError, Result};
 
-const V1_DDL: &str = "
+pub(crate) const V1_DDL: &str = "
 CREATE TABLE local_identity (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   address_name TEXT NOT NULL,
