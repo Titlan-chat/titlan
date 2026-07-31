@@ -60,6 +60,12 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<BundleData> {
         .map_err(|_| CoreError::Malformed("bundle address is not UTF-8"))?;
     let registration_id = cursor.u32()?;
     let device_id = cursor.u32()?;
+    if device_id != 1 {
+        // v1 conformance (freeze §H2.2): the u32 field is wire headroom, but
+        // protocol v1 admits exactly device_id 1 — anything else is rejected
+        // at parse time, fail-closed, before any session state is touched.
+        return Err(CoreError::Malformed("unsupported device id in v1"));
+    }
     let identity_key = cursor.bytes_field()?.to_vec();
     let signed_prekey_id = cursor.u32()?;
     let signed_prekey_pub = cursor.bytes_field()?.to_vec();
@@ -122,6 +128,9 @@ pub(crate) fn parse_mailbox_update(bytes: &[u8]) -> Result<(String, String)> {
     }
     let relay_url = utf8(c.bytes_field()?)?;
     let inbox_id = utf8(c.take(MAILBOX_ID_LEN)?)?;
+    if c.pos != bytes.len() {
+        return Err(CoreError::Malformed("trailing bytes in mailbox-update/1"));
+    }
     Ok((relay_url, inbox_id))
 }
 

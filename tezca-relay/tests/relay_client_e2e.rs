@@ -14,13 +14,13 @@ mod common;
 
 use std::sync::{Arc, Mutex};
 
-use common::{GENEROUS_LIMITS, free_port, spawn_relay_at};
+use common::{GENEROUS_LIMITS, deposit, free_port, spawn_relay_at, ws_next_message, ws_subscribe};
 use tempfile::TempDir;
 use tezca_core::client::{
     ConnectionObserver, ConnectionState, ConversationId, MessageReceiver, TitlanClient,
 };
 use tezca_core::config::PaddingProfile;
-use tezca_core::envelope::InnerFrame;
+use tezca_core::envelope::{InnerFrame, PayloadType};
 use tezca_core::storage::{DbKey, Store, StoredMessage};
 use tezca_core::{CoreError, identity, session};
 
@@ -454,6 +454,96 @@ fn delivered_message_is_durably_persisted() {
             .iter()
             .any(|m| m.body == b"durable"),
         "the delivered message must be durable in SQLCipher (ack-after-persist)",
+    );
+    drop(relay);
+}
+
+/// 18b (freeze §H1.4, normative ack-and-discard): a registry-valid but
+/// unimplemented payload type (posture/1) deposited onto a LIVE conversation
+/// inbox is acked and discarded — no message row is persisted, the listener
+/// survives to deliver subsequent chat, and the mailbox ends drained (the
+/// relay replays every un-acked message to a fresh subscriber, so an empty
+/// raw read proves the ack happened).
+#[test]
+fn unimplemented_payload_type_is_acked_and_discarded_on_live_inbox() {
+    let dir = TempDir::new().unwrap();
+    let d = TempDir::new().unwrap();
+    let relay = spawn_relay_at(free_port(), GENEROUS_LIMITS, d.path());
+    let url = format!("ws://{}", relay.base());
+
+    let alice = new_client(&dir, "alice.db", &url);
+    // Bob's key is kept so the test can open a second store connection on his
+    // DB (same file, same ratchet state) to mint a non-chat frame.
+    let bob_key = DbKey::generate();
+    let bob = TitlanClient::open(&dir.path().join("bob.db"), &bob_key, &url).expect("open bob");
+    bob.initialize_identity().expect("init bob");
+
+    let alice_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    let conv_a = alice.list_conversations().unwrap()[0];
+
+    // Encrypt a posture/1 frame under the live Bob→Alice session and deposit
+    // it directly into Alice's conversation inbox.
+    let bob_store = Store::open(&dir.path().join("bob.db"), &bob_key).expect("reopen bob store");
+    let convo = bob_store
+        .get_conversation(&conv_b)
+        .expect("read conversation")
+        .expect("bob conversation exists");
+    let alice_inbox = convo
+        .mailbox_send
+        .clone()
+        .expect("alice inbox learned at pairing");
+    let posture = InnerFrame {
+        payload_type: PayloadType::Posture,
+        type_version: 1,
+        payload: b"machine payload".to_vec(),
+    };
+    let wire = session::encrypt_message(
+        &bob_store,
+        &convo.peer_address,
+        &posture,
+        &PaddingProfile::default_profile(),
+    )
+    .expect("encrypt posture/1");
+    assert_eq!(deposit(&relay.base(), &alice_inbox, &wire).status, 202);
+
+    // Listener survives (no error surfaced, no loop wedge): a subsequent chat
+    // message on the same conversation still delivers. FIFO replay means the
+    // posture frame was handled before this chat arrived.
+    bob.send_chat(&conv_b, "after unsupported frame").unwrap();
+    wait_until(|| {
+        alice_rx
+            .texts()
+            .contains(&"after unsupported frame".to_string())
+    });
+
+    // Discarded: nothing but the chat row was persisted.
+    let rows = alice.messages(&conv_a).unwrap();
+    assert!(
+        rows.iter()
+            .all(|m| m.payload_type == PayloadType::Chat as u8),
+        "no non-chat row may be persisted (ack-and-discard), got payload types {:?}",
+        rows.iter().map(|m| m.payload_type).collect::<Vec<_>>(),
+    );
+    assert_eq!(rows.len(), 1, "exactly the delivered chat row");
+
+    // Acked/drained: let the final ack round-trip settle, stop Alice's sync
+    // (joined stop), then attach a raw subscriber. The relay replays every
+    // un-acked message to a new subscriber, so a timed-out empty read proves
+    // both frames were acked and the mailbox is drained.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    alice.stop_sync().unwrap();
+    let mut ws = ws_subscribe(&relay.base(), &alice_inbox).expect("raw subscribe");
+    assert!(
+        ws_next_message(&mut ws).is_err(),
+        "mailbox must be drained — an un-acked posture frame would be replayed",
     );
     drop(relay);
 }
