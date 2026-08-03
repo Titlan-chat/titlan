@@ -35,8 +35,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v6
-      - uses: taiki-e/cache-cargo-install-action@v3
+      - uses: gradle/actions/setup-gradle@v6.2.0
+      - uses: taiki-e/cache-cargo-install-action@v3.0.7
         with:
           tool: cargo-cyclonedx
 
