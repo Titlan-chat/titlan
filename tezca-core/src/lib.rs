@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
 
+#![forbid(unsafe_code)]
+
 //! `tezca-core` — shared end-to-end-encryption core for the Tezca platform,
 //! first consumed by the Titlan messenger.
 //!

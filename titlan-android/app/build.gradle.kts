@@ -47,9 +47,10 @@ android {
 
     defaultConfig {
         applicationId = titlanApplicationId
-        // GrapheneOS-supported devices all run Android 13+; revisit only if a
-        // concrete target device requires lower (not a locked decision).
-        minSdk = 33
+        // Android 14+ floor (F3, ratified 2026-08-05; InlinedApi moot).
+        // Revisit only if a concrete target device requires lower (not a
+        // locked decision).
+        minSdk = 34
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
