@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
 
+#![forbid(unsafe_code)]
+
 //! `tezca-relay` — blind, stateless message relay (work order §6 Phase 3).
 //!
 //! Standing constraints:
