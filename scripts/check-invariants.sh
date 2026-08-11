@@ -466,9 +466,128 @@ if [ -z "$ffi_err_line" ] || [ -z "$ffi_throw_line" ] || [ -z "$ffi_call_line" ]
   fail=1
 fi
 
+# --- 11. Relay semantic-blindness dep-graph (INV-8, freeze H4.1) --------------
+# The relay must never acquire group, blob, directory, or any payload-semantic
+# awareness (freeze H4.1); the mechanical leading indicator is dependency
+# creep. tezca-relay's NORMAL dependency graph must exclude tezca-core: the
+# acceptance harness may use it (dev-dependencies — exempted by `-e normal`),
+# the relay binary may not. cargo being absent is a LOUD failure, not a skip —
+# a silently skipped family is a blind family (the invariants CI job installs
+# the pinned toolchain for exactly this).
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "INV-8/H4.1: cargo unavailable — family 11 cannot assert tezca-relay's dependency graph (install the pinned Rust toolchain in this job)"
+  fail=1
+elif relay_tree=$(cargo tree -p tezca-relay -e normal --locked 2>/dev/null); then
+  relay_core_hits=$(printf '%s\n' "$relay_tree" | grep -F 'tezca-core' || true)
+  if [ -n "$relay_core_hits" ]; then
+    echo "INV-8/H4.1 violation: tezca-core appears in tezca-relay's NORMAL dependency graph (envelope awareness is dev-scope only; the relay stays payload-blind):"
+    echo "$relay_core_hits"
+    fail=1
+  fi
+else
+  echo "INV-8/H4.1: 'cargo tree -p tezca-relay -e normal --locked' failed — family 11 cannot assert tezca-relay's dependency graph (lockfile drift or toolchain breakage; failing loudly rather than skipping)"
+  fail=1
+fi
+
+# --- 12. No crash-reporting SDK (INV-1) ---------------------------------------
+# INV-1's "crash reports" clause: no crash-reporting/telemetry pathway may
+# exist in the app. The gradle lockfile pins the full dependency universe (a
+# transitive SDK cannot hide); build.gradle.kts catches a coordinate added but
+# not yet locked. Token count must be ZERO in each (G1 ratified 2026-08-10).
+crash_sdk_re='acra|crashlytics|sentry|bugsnag|firebase'
+for f in titlan-android/app/gradle.lockfile titlan-android/app/build.gradle.kts; do
+  if [ ! -f "$f" ]; then
+    echo "INV-1 crash-SDK check: input $f is missing (family 12 cannot run)"
+    fail=1
+    continue
+  fi
+  crash_hits=$(grep -icE "$crash_sdk_re" "$f" || true)
+  if [ "$crash_hits" -ne 0 ]; then
+    echo "INV-1 violation: crash-reporting SDK token(s) in $f (matches for $crash_sdk_re):"
+    grep -inE "$crash_sdk_re" "$f"
+    fail=1
+  fi
+done
+
+# --- 13. Relay unit hardening directives (INV-3) ------------------------------
+# The relay-hardening CI job's `systemd-analyze verify` checks only that the
+# unit is WELL-FORMED — deleting a hardening directive would still verify.
+# Content-assert each INV-3 line verbatim (G2.i ratified 2026-08-10).
+relay_unit=deploy/tezca-relay.service
+for directive in 'MemorySwapMax=0' 'LimitCORE=0' 'LimitMEMLOCK=infinity' \
+                 'ProtectSystem=strict' 'ReadOnlyPaths=/' 'PrivateTmp=yes'; do
+  if ! grep -qxF "$directive" "$relay_unit"; then
+    echo "INV-3 violation: hardening directive '$directive' missing from $relay_unit"
+    fail=1
+  fi
+done
+
+# --- 14. Relay-URL single constant (INV-5) ------------------------------------
+# The ONLY relay-URL literal in Rust lives in tezca-core/src/config.rs
+# (DEFAULT_RELAY_URL); tezca-relay/src and src/main Kotlin carry none. The
+# sweep matches URL-SHAPED literals only — `wss://`/`ws://` followed by an
+# authority character — so the bare scheme-prefix parsing literals in
+# relay_client/http.rs (`"ws://"`/`"wss://"` ahead of a closing quote) cannot
+# false-positive. Comment lines are stripped (doc comments name the schemes);
+# `#[cfg(test)]` modules are excluded by brace-tracking (test fixtures pin
+# scratch URLs by design). Initial allowlist settled against the enumerated
+# site list in report p5-5b2-inv-matrix §INV-5 (G3 ratified 2026-08-10).
+url_re='wss?://[^"[:space:]]'
+cfg_test_filter='
+FNR == 1 { pending = 0; skip = 0; depth = 0 }
+{
+  if (skip) {
+    depth += gsub(/{/, "{") - gsub(/}/, "}")
+    if (depth <= 0) skip = 0
+    next
+  }
+  if (pending && $0 ~ /(^|[[:space:]])mod[[:space:]]/) {
+    d = gsub(/{/, "{") - gsub(/}/, "}")
+    if (d > 0) { skip = 1; depth = d }
+    pending = 0
+    next
+  }
+  if ($0 ~ /^[[:space:]]*#\[cfg\(test\)\]/) { pending = 1; next }
+  if (pending && $0 !~ /^[[:space:]]*#\[/ && $0 !~ /^[[:space:]]*$/) pending = 0
+  printf "%s:%d:%s\n", FILENAME, FNR, $0
+}'
+rust_scope=$(list_files | grep -E '^(tezca-core|tezca-relay)/src/.*\.rs$' || true)
+if [ -z "$rust_scope" ]; then
+  echo "family 14: no Rust sources found under tezca-core/src or tezca-relay/src (sweep cannot run)"
+  fail=1
+else
+  url_census=$(awk "$cfg_test_filter" $rust_scope \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' \
+    | grep -E "$url_re" || true)
+  # Positive control: the sweep must SEE the sanctioned constant, else the
+  # pipeline itself has gone blind (awk/grep regression).
+  if ! printf '%s\n' "$url_census" | grep -q '^tezca-core/src/config.rs:'; then
+    echo "positive control failed: family 14 sweep cannot see DEFAULT_RELAY_URL in tezca-core/src/config.rs (check is blind)"
+    fail=1
+  fi
+  url_hits=$(printf '%s\n' "$url_census" | grep -v '^tezca-core/src/config.rs:' || true)
+  if [ -n "$url_hits" ]; then
+    echo "INV-5 violation: relay-URL literal outside the single default-config constant (tezca-core/src/config.rs):"
+    echo "$url_hits"
+    fail=1
+  fi
+fi
+# Kotlin (src/main only): zero URL literals — the two sanctioned Gradle
+# literals (debug fallback + release placeholder) are family-7 territory.
+kt_scope=$(list_files | grep -E '^titlan-android/app/src/main/.*\.kt$' || true)
+if [ -n "$kt_scope" ]; then
+  kt_url_hits=$(grep -nE "$url_re" $kt_scope /dev/null 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)
+  if [ -n "$kt_url_hits" ]; then
+    echo "INV-5 violation: relay-URL literal in src/main Kotlin (addresses come from BuildConfig/conversation config, never source literals):"
+    echo "$kt_url_hits"
+    fail=1
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes)."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant)."
