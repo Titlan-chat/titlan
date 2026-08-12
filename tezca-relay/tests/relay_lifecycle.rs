@@ -342,3 +342,71 @@ fn settled_rss(relay: &common::RelayProc) -> u64 {
     }
     min
 }
+
+/// INV-3 positive lock assertion (G2.ii ratified 2026-08-10): when the
+/// environment grants RLIMIT_MEMLOCK, the relay's best-effort
+/// `mlockall(CURRENT|FUTURE)` (hardening.rs) must actually pin pages —
+/// `VmLck` in `/proc/<pid>/status` strictly positive on the live child.
+/// When the environment denies memlock, SKIP cleanly with a printed reason
+/// (runtime-conditional early return — the suite's existing graceful-skip
+/// pattern, cf. `relay_never_writes_to_storage`'s unreadable-/proc
+/// fallback; a static `#[ignore]` cannot express a grant only knowable at
+/// runtime).
+#[test]
+fn relay_memory_is_locked_when_memlock_granted() {
+    // Raise our own soft RLIMIT_MEMLOCK to the hard cap (an unprivileged
+    // raise; the relay child inherits both). mlockall pins the whole
+    // address space — worker-thread stacks included — so "granted" means
+    // comfortably above that budget, not merely nonzero: under a small
+    // limit MCL_FUTURE turns a later stack mmap into EAGAIN and a startup
+    // panic (CI run 29668894554; the systemd unit grants
+    // LimitMEMLOCK=infinity for the same reason).
+    const GRANTED_FLOOR_BYTES: u64 = 512 * 1024 * 1024;
+    let lim = rustix::process::getrlimit(rustix::process::Resource::Memlock);
+    let _ = rustix::process::setrlimit(
+        rustix::process::Resource::Memlock,
+        rustix::process::Rlimit {
+            current: lim.maximum,
+            maximum: lim.maximum,
+        },
+    );
+    let effective = rustix::process::getrlimit(rustix::process::Resource::Memlock).current;
+    if let Some(soft) = effective {
+        // `None` is RLIM_INFINITY (always granted).
+        if soft < GRANTED_FLOOR_BYTES {
+            println!(
+                "SKIP relay_memory_is_locked_when_memlock_granted: environment denies memlock \
+                 (RLIMIT_MEMLOCK soft {soft} B < {GRANTED_FLOOR_BYTES} B floor after raising \
+                 soft to the hard cap)"
+            );
+            return;
+        }
+    }
+
+    // hardening::apply() runs before the listener comes up (main.rs), so by
+    // the time /healthz answered inside spawn_relay the lock state is final.
+    let (relay, _dir) = spawn_relay(GENEROUS_LIMITS);
+    let locked_kb = vmlck_kb(relay.pid());
+    println!("VmLck observed: {locked_kb} kB (memlock granted, soft limit {effective:?} B)");
+    assert!(
+        locked_kb > 0,
+        "INV-3: RLIMIT_MEMLOCK is granted (soft {effective:?} B) but the relay holds no \
+         locked memory (VmLck = 0 kB) — mlockall(CURRENT|FUTURE) did not take"
+    );
+}
+
+/// `VmLck` (locked-memory kB) of a live process, from /proc/<pid>/status.
+fn vmlck_kb(pid: u32) -> u64 {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).expect("proc status");
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmLck:") {
+            return rest
+                .trim()
+                .trim_end_matches(" kB")
+                .trim()
+                .parse()
+                .expect("VmLck");
+        }
+    }
+    panic!("VmLck not found in /proc/{pid}/status");
+}
