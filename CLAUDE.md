@@ -103,3 +103,5 @@ autonomously.
   resources (`scripts/check-invariants.sh`).
 - Builds must stay reproducible (`scripts/repro-build.sh`); lockfiles are
   committed; toolchains are pinned.
+- Any change touching `tezca-relay/` is reviewed against
+  `docs/checklists/inv8-relay-blindness.md` (INV-8).
