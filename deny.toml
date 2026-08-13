@@ -225,6 +225,24 @@ deny = [
     { name = "rsa", wrappers = [] },
     { name = "libcrux-ml-kem", wrappers = ["libsignal-protocol", "spqr"] },
     { name = "hpke-rs", wrappers = ["signal-crypto"] },
+    # G5 ratified 2026-08-10: widen the primitive ban list with nine
+    # never-legitimate crates. Eight are absent from the graph and carry
+    # empty wrapper lists — any future appearance fails CI outright.
+    { name = "blake3", wrappers = [] },
+    { name = "sha3", wrappers = [] },
+    # chacha20: superseding resolution ratified 2026-08-13 (this file's sha1
+    # precedent) — chacha20 v0.10.1 is ALREADY in the graph as rand 0.10's
+    # ChaCha core (tungstenite 0.30's masking-RNG chain, and rand as consumed
+    # inside libsignal's hpke-rs-crypto/libcrux tree; cargo tree -i: rand is
+    # its ONLY direct parent). Wrapper-scoped to exactly that parent; any
+    # other parent of chacha20 still fails CI.
+    { name = "chacha20", wrappers = ["rand"] },
+    { name = "salsa20", wrappers = [] },
+    { name = "poly1305", wrappers = [] },
+    { name = "p256", wrappers = [] },
+    { name = "k256", wrappers = [] },
+    { name = "des", wrappers = [] },
+    { name = "blowfish", wrappers = [] },
     # Single-TLS-provider policy (Phase 4a flag 2a): rustls runs on **ring**
     # across the whole tree (INV-6 names ring). aws-lc-rs is the other rustls
     # provider and must NEVER enter — the Phase 4a client stack (reqwest,
