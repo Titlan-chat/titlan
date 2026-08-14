@@ -303,7 +303,7 @@ proptest! {
             payload,
         };
         let encoded = frame.encode(&profile).unwrap();
-        prop_assert!(profile.is_bucket(encoded.len() as u32));
+        prop_assert!(profile.is_bucket(u32::try_from(encoded.len()).expect("encoded len fits u32")));
         prop_assert_eq!(InnerFrame::parse(&encoded, &profile).unwrap(), frame);
     }
 

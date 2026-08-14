@@ -36,7 +36,7 @@ impl PaddingProfile {
     pub fn new(mut buckets: Vec<u32>) -> crate::Result<Self> {
         buckets.sort_unstable();
         buckets.dedup();
-        if buckets.is_empty() || buckets[0] < crate::envelope::INNER_HEADER_LEN as u32 {
+        if buckets.is_empty() || buckets[0] < crate::envelope::INNER_HEADER_LEN_U32 {
             return Err(crate::CoreError::Malformed("invalid padding profile"));
         }
         Ok(Self { buckets })
@@ -64,6 +64,6 @@ impl PaddingProfile {
     /// Maximum payload size this profile can carry.
     #[must_use]
     pub fn max_payload(&self) -> u32 {
-        self.buckets[self.buckets.len() - 1] - crate::envelope::INNER_HEADER_LEN as u32
+        self.buckets[self.buckets.len() - 1] - crate::envelope::INNER_HEADER_LEN_U32
     }
 }

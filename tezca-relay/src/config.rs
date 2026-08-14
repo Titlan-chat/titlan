@@ -85,38 +85,35 @@ impl Config {
                     cfg.sweep = Duration::from_secs(parse_num(&flag, &value("--sweep-secs")?)?);
                 }
                 "--max-blob-bytes" => {
-                    cfg.max_blob_bytes = parse_num(&flag, &value("--max-blob-bytes")?)? as usize;
+                    cfg.max_blob_bytes = parse_num(&flag, &value("--max-blob-bytes")?)?;
                 }
                 "--mailbox-max-messages" => {
-                    cfg.mailbox_max_messages =
-                        parse_num(&flag, &value("--mailbox-max-messages")?)? as usize;
+                    cfg.mailbox_max_messages = parse_num(&flag, &value("--mailbox-max-messages")?)?;
                 }
                 "--mailbox-max-bytes" => {
-                    cfg.mailbox_max_bytes =
-                        parse_num(&flag, &value("--mailbox-max-bytes")?)? as usize;
+                    cfg.mailbox_max_bytes = parse_num(&flag, &value("--mailbox-max-bytes")?)?;
                 }
                 "--max-mailboxes" => {
-                    cfg.max_mailboxes = parse_num(&flag, &value("--max-mailboxes")?)? as usize;
+                    cfg.max_mailboxes = parse_num(&flag, &value("--max-mailboxes")?)?;
                 }
                 "--rate-create-per-min" => {
-                    cfg.rate_create_per_min =
-                        parse_num(&flag, &value("--rate-create-per-min")?)? as u32;
+                    cfg.rate_create_per_min = parse_num(&flag, &value("--rate-create-per-min")?)?;
                 }
                 "--rate-put-per-min-source" => {
                     cfg.rate_put_per_min_source =
-                        parse_num(&flag, &value("--rate-put-per-min-source")?)? as u32;
+                        parse_num(&flag, &value("--rate-put-per-min-source")?)?;
                 }
                 "--rate-deposit-per-min-source" => {
                     cfg.rate_deposit_per_min_source =
-                        parse_num(&flag, &value("--rate-deposit-per-min-source")?)? as u32;
+                        parse_num(&flag, &value("--rate-deposit-per-min-source")?)?;
                 }
                 "--rate-deposit-per-min-mailbox" => {
                     cfg.rate_deposit_per_min_mailbox =
-                        parse_num(&flag, &value("--rate-deposit-per-min-mailbox")?)? as u32;
+                        parse_num(&flag, &value("--rate-deposit-per-min-mailbox")?)?;
                 }
                 "--rate-ws-per-min-mailbox" => {
                     cfg.rate_ws_per_min_mailbox =
-                        parse_num(&flag, &value("--rate-ws-per-min-mailbox")?)? as u32;
+                        parse_num(&flag, &value("--rate-ws-per-min-mailbox")?)?;
                 }
                 other => return Err(format!("unknown flag: {other}")),
             }
@@ -128,6 +125,9 @@ impl Config {
     }
 }
 
-fn parse_num(flag: &str, s: &str) -> Result<u64, String> {
+fn parse_num<T: std::str::FromStr>(flag: &str, s: &str) -> Result<T, String>
+where
+    T::Err: std::fmt::Display,
+{
     s.parse().map_err(|e| format!("{flag}: {e}"))
 }

@@ -49,9 +49,9 @@ const B64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 pub fn encode_mailbox_id(bytes: &[u8; 32]) -> String {
     let mut out = String::with_capacity(43);
     for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(*chunk.get(1).unwrap_or(&0));
+        let b2 = u32::from(*chunk.get(2).unwrap_or(&0));
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(B64URL[(n >> 18) as usize & 63] as char);
         out.push(B64URL[(n >> 12) as usize & 63] as char);

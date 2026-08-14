@@ -10,6 +10,7 @@
 
 mod inner;
 
+pub(crate) use inner::INNER_HEADER_LEN_U32;
 pub use inner::{INNER_HEADER_LEN, InnerFrame, PayloadType};
 
 use crate::{CoreError, Result};

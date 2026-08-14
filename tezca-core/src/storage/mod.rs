@@ -369,12 +369,15 @@ impl Store {
             [id.as_slice()],
             |row| {
                 Ok(RecoveryRecord {
-                    role: row.get::<_, Option<i64>>(0)?.map(|r| r as u8),
+                    // rusqlite's FromSql for u8/u32 is range-checked: an
+                    // out-of-range column value becomes a conversion error
+                    // on the existing rusqlite error channel (sql_err).
+                    role: row.get::<_, Option<u8>>(0)?,
                     own_contrib: row.get::<_, Option<Vec<u8>>>(1)?.map(|v| blob32(&v)),
                     peer_contrib: row.get::<_, Option<Vec<u8>>>(2)?.map(|v| blob32(&v)),
                     root: row.get::<_, Option<Vec<u8>>>(3)?.map(|v| blob32(&v)),
-                    own_gen: row.get::<_, i64>(4)? as u32,
-                    peer_gen: row.get::<_, i64>(5)? as u32,
+                    own_gen: row.get::<_, u32>(4)?,
+                    peer_gen: row.get::<_, u32>(5)?,
                 })
             },
         ) {
@@ -395,7 +398,7 @@ impl Store {
         conn.execute(
             "UPDATE conversations
                SET recovery_role = ?2, recovery_own_contrib = ?3 WHERE id = ?1",
-            rusqlite::params![id.as_slice(), role as i64, own_contrib.as_slice()],
+            rusqlite::params![id.as_slice(), i64::from(role), own_contrib.as_slice()],
         )
         .map_err(sql_err)?;
         Ok(())
@@ -430,7 +433,7 @@ impl Store {
         conn.execute(
             "UPDATE conversations
                SET recovery_own_gen = ?2, recovery_peer_gen = ?3 WHERE id = ?1",
-            rusqlite::params![id.as_slice(), own_gen as i64, peer_gen as i64],
+            rusqlite::params![id.as_slice(), i64::from(own_gen), i64::from(peer_gen)],
         )
         .map_err(sql_err)?;
         Ok(())
@@ -656,7 +659,7 @@ mod v1_to_v3_migration_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("v1.db");
         let key = DbKey::generate();
-        let conv_id: [u8; 16] = std::array::from_fn(|i| i as u8);
+        let conv_id: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).expect("index < 16"));
         let msg_id = [0xEEu8; 16];
 
         // Build the v1 database exactly as Phase 2 created it: a keyed

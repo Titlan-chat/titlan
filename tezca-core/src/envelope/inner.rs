@@ -14,6 +14,9 @@ use crate::{CoreError, Result};
 
 /// Inner-frame header length in bytes.
 pub const INNER_HEADER_LEN: usize = 6;
+/// [`INNER_HEADER_LEN`] as `u32` for bucket arithmetic.
+pub(crate) const INNER_HEADER_LEN_U32: u32 = 6;
+const _: () = assert!(INNER_HEADER_LEN == INNER_HEADER_LEN_U32 as usize);
 
 /// Payload type registry (normative registry lives in `proto/envelope.md`).
 ///
@@ -75,7 +78,7 @@ impl InnerFrame {
         if len > max {
             return Err(CoreError::PayloadTooLarge { len, max });
         }
-        let frame_len = INNER_HEADER_LEN as u32 + len;
+        let frame_len = INNER_HEADER_LEN_U32 + len;
         let bucket = profile
             .bucket_for(frame_len)
             .ok_or(CoreError::Malformed("no bucket fits frame"))?;

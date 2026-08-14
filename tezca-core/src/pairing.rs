@@ -567,9 +567,9 @@ mod v2_tests {
     fn b64url_encode(data: &[u8]) -> String {
         let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
         for chunk in data.chunks(3) {
-            let b0 = chunk[0] as u32;
-            let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-            let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+            let b0 = u32::from(chunk[0]);
+            let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+            let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
             let n = (b0 << 16) | (b1 << 8) | b2;
             out.push(B64URL_ALPHABET[(n >> 18) as usize & 63] as char);
             out.push(B64URL_ALPHABET[(n >> 12) as usize & 63] as char);
@@ -587,20 +587,24 @@ mod v2_tests {
     /// whitespace — anything else panics (this is test-side tooling).
     fn b64url_decode(s: &str) -> Vec<u8> {
         let val = |c: u8| -> u32 {
-            B64URL_ALPHABET
+            let pos = B64URL_ALPHABET
                 .iter()
                 .position(|&a| a == c)
-                .unwrap_or_else(|| panic!("non-b64url byte {c:#04x}")) as u32
+                .unwrap_or_else(|| panic!("non-b64url byte {c:#04x}"));
+            u32::try_from(pos).expect("alphabet index < 64")
         };
         let bytes = s.as_bytes();
         assert!(bytes.len() % 4 != 1, "invalid b64url length");
         let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
         for chunk in bytes.chunks(4) {
             let n = chunk.iter().fold(0u32, |acc, &c| (acc << 6) | val(c));
+            // Byte extraction via to_be_bytes: for a k-chunk, the decoded
+            // 6k-bit group is left-aligned to bit 23 and the top full bytes
+            // are taken — identical to the former shift-and-truncate casts.
             match chunk.len() {
-                4 => out.extend_from_slice(&[(n >> 16) as u8, (n >> 8) as u8, n as u8]),
-                3 => out.extend_from_slice(&[(n >> 10) as u8, (n >> 2) as u8]),
-                2 => out.push((n >> 4) as u8),
+                4 => out.extend_from_slice(&n.to_be_bytes()[1..4]),
+                3 => out.extend_from_slice(&(n << 6).to_be_bytes()[1..3]),
+                2 => out.push((n << 4).to_be_bytes()[2]),
                 _ => unreachable!("length % 4 == 1 rejected above"),
             }
         }

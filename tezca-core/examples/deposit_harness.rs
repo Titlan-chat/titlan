@@ -257,9 +257,9 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 fn b64url_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+        let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(ALPHABET[(n >> 18) as usize & 63] as char);
         out.push(ALPHABET[(n >> 12) as usize & 63] as char);
@@ -276,9 +276,9 @@ fn b64url_encode(data: &[u8]) -> String {
 fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     fn val(c: u8) -> Option<u32> {
         match c {
-            b'A'..=b'Z' => Some((c - b'A') as u32),
-            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
-            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+            b'A'..=b'Z' => Some(u32::from(c - b'A')),
+            b'a'..=b'z' => Some(u32::from(c - b'a' + 26)),
+            b'0'..=b'9' => Some(u32::from(c - b'0' + 52)),
             b'-' => Some(62),
             b'_' => Some(63),
             _ => None,
@@ -294,13 +294,15 @@ fn b64url_decode(s: &str) -> Option<Vec<u8>> {
         for &c in chunk {
             n = (n << 6) | val(c)?;
         }
-        n <<= (6 * (4 - chunk.len())) as u32;
-        out.push((n >> 16) as u8);
+        n <<= 6 * (4 - chunk.len());
+        // Byte extraction via to_be_bytes (n is a left-aligned 24-bit group).
+        let group = n.to_be_bytes();
+        out.push(group[1]);
         if chunk.len() > 2 {
-            out.push((n >> 8) as u8);
+            out.push(group[2]);
         }
         if chunk.len() > 3 {
-            out.push(n as u8);
+            out.push(group[3]);
         }
     }
     Some(out)
