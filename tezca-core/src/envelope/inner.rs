@@ -55,6 +55,7 @@ pub struct InnerFrame {
 
 impl InnerFrame {
     /// Convenience constructor for `chat/1` frames.
+    #[must_use]
     pub fn chat_v1(text: &str) -> Self {
         Self {
             payload_type: PayloadType::Chat,

@@ -11,7 +11,11 @@ use tezca_core::config::PaddingProfile;
 use tezca_core::envelope::{Envelope, EnvelopeKind, InnerFrame, PayloadType};
 
 fn hex_of(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write;
+    bytes.iter().fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    })
 }
 
 // ---------------------------------------------------------------------------

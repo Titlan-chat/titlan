@@ -370,7 +370,7 @@ impl Engine {
                             }
                             let _ = sub.ack(&msg_id).await;
                         }
-                        Ok(Ok(None)) | Ok(Err(_)) => break,
+                        Ok(Ok(None) | Err(_)) => break,
                         Err(_) => {
                             return Err(CoreError::Network("pairing handoff timed out".into()));
                         }
@@ -427,7 +427,7 @@ impl Engine {
                 // this blob — permanent failure. Mark it sent so it stops
                 // retrying, and surface it (frozen §1). NotFound / other = a
                 // transient outage → leave pending, retry on reconnect.
-                DepositOutcome::Other(400) | DepositOutcome::Other(413) => {
+                DepositOutcome::Other(400 | 413) => {
                     let _ = self.store.mark_message_sent(&msg_id);
                     self.emit_permanent_send_failure(*conv, msg_id);
                 }
@@ -890,7 +890,7 @@ async fn conversation_listener(
         };
         engine.emit_state(conv, ConnectionState::Connecting);
         let connected = tokio::select! {
-            _ = cancelled(&mut cancel) => return,
+            () = cancelled(&mut cancel) => return,
             c = ws::subscribe(&engine.my_relay, &recv, convo.relay_pin) => c,
         };
         match connected {
@@ -898,13 +898,13 @@ async fn conversation_listener(
                 backoff.reset();
                 engine.emit_state(conv, ConnectionState::Online);
                 tokio::select! {
-                    _ = cancelled(&mut cancel) => return,
+                    () = cancelled(&mut cancel) => return,
                     _ = engine.flush_pending(&conv) => {}
                 }
                 let mut reconnect = false;
                 loop {
                     let next = tokio::select! {
-                        _ = cancelled(&mut cancel) => return,
+                        () = cancelled(&mut cancel) => return,
                         n = sub.next() => n,
                     };
                     let Ok(Some((msg_id, envelope))) = next else {
@@ -935,12 +935,12 @@ async fn conversation_listener(
                     },
                 );
                 tokio::select! {
-                    _ = cancelled(&mut cancel) => return,
-                    _ = tokio::time::sleep(d) => {}
+                    () = cancelled(&mut cancel) => return,
+                    () = tokio::time::sleep(d) => {}
                 }
             }
             Connected::NotFound => match tokio::select! {
-                _ = cancelled(&mut cancel) => return,
+                () = cancelled(&mut cancel) => return,
                 r = engine.recover(&conv) => r,
             } {
                 Recovery::OneSided => {
@@ -963,8 +963,8 @@ async fn conversation_listener(
                 Recovery::Failed => {
                     let d = backoff.next_delay();
                     tokio::select! {
-                        _ = cancelled(&mut cancel) => return,
-                        _ = tokio::time::sleep(d) => {}
+                        () = cancelled(&mut cancel) => return,
+                        () = tokio::time::sleep(d) => {}
                     }
                 }
             },
@@ -978,8 +978,8 @@ async fn conversation_listener(
                     },
                 );
                 tokio::select! {
-                    _ = cancelled(&mut cancel) => return,
-                    _ = tokio::time::sleep(d) => {}
+                    () = cancelled(&mut cancel) => return,
+                    () = tokio::time::sleep(d) => {}
                 }
             }
         }

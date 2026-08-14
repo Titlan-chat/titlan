@@ -8,5 +8,5 @@
 //! generated at build time, never committed).
 
 fn main() {
-    uniffi::uniffi_bindgen_main()
+    uniffi::uniffi_bindgen_main();
 }

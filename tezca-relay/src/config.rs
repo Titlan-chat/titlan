@@ -41,8 +41,8 @@ impl Default for Config {
             plain_http: false,
             tls_cert: None,
             tls_key: None,
-            ttl: Duration::from_secs(14 * 24 * 3600),
-            sweep: Duration::from_secs(3600),
+            ttl: Duration::from_hours(336),
+            sweep: Duration::from_hours(1),
             max_blob_bytes: 16 * 1024,
             mailbox_max_messages: 1000,
             mailbox_max_bytes: 4 * 1024 * 1024,
@@ -52,7 +52,7 @@ impl Default for Config {
             rate_deposit_per_min_source: 60,
             rate_deposit_per_min_mailbox: 120,
             rate_ws_per_min_mailbox: 6,
-            limiter_idle: Duration::from_secs(600),
+            limiter_idle: Duration::from_mins(10),
             limiter_max_sources: 65_536,
         }
     }
@@ -79,44 +79,44 @@ impl Config {
                 "--tls-cert" => cfg.tls_cert = Some(PathBuf::from(value("--tls-cert")?)),
                 "--tls-key" => cfg.tls_key = Some(PathBuf::from(value("--tls-key")?)),
                 "--ttl-secs" => {
-                    cfg.ttl = Duration::from_secs(parse_num(&flag, &value("--ttl-secs")?)?)
+                    cfg.ttl = Duration::from_secs(parse_num(&flag, &value("--ttl-secs")?)?);
                 }
                 "--sweep-secs" => {
-                    cfg.sweep = Duration::from_secs(parse_num(&flag, &value("--sweep-secs")?)?)
+                    cfg.sweep = Duration::from_secs(parse_num(&flag, &value("--sweep-secs")?)?);
                 }
                 "--max-blob-bytes" => {
-                    cfg.max_blob_bytes = parse_num(&flag, &value("--max-blob-bytes")?)? as usize
+                    cfg.max_blob_bytes = parse_num(&flag, &value("--max-blob-bytes")?)? as usize;
                 }
                 "--mailbox-max-messages" => {
                     cfg.mailbox_max_messages =
-                        parse_num(&flag, &value("--mailbox-max-messages")?)? as usize
+                        parse_num(&flag, &value("--mailbox-max-messages")?)? as usize;
                 }
                 "--mailbox-max-bytes" => {
                     cfg.mailbox_max_bytes =
-                        parse_num(&flag, &value("--mailbox-max-bytes")?)? as usize
+                        parse_num(&flag, &value("--mailbox-max-bytes")?)? as usize;
                 }
                 "--max-mailboxes" => {
-                    cfg.max_mailboxes = parse_num(&flag, &value("--max-mailboxes")?)? as usize
+                    cfg.max_mailboxes = parse_num(&flag, &value("--max-mailboxes")?)? as usize;
                 }
                 "--rate-create-per-min" => {
                     cfg.rate_create_per_min =
-                        parse_num(&flag, &value("--rate-create-per-min")?)? as u32
+                        parse_num(&flag, &value("--rate-create-per-min")?)? as u32;
                 }
                 "--rate-put-per-min-source" => {
                     cfg.rate_put_per_min_source =
-                        parse_num(&flag, &value("--rate-put-per-min-source")?)? as u32
+                        parse_num(&flag, &value("--rate-put-per-min-source")?)? as u32;
                 }
                 "--rate-deposit-per-min-source" => {
                     cfg.rate_deposit_per_min_source =
-                        parse_num(&flag, &value("--rate-deposit-per-min-source")?)? as u32
+                        parse_num(&flag, &value("--rate-deposit-per-min-source")?)? as u32;
                 }
                 "--rate-deposit-per-min-mailbox" => {
                     cfg.rate_deposit_per_min_mailbox =
-                        parse_num(&flag, &value("--rate-deposit-per-min-mailbox")?)? as u32
+                        parse_num(&flag, &value("--rate-deposit-per-min-mailbox")?)? as u32;
                 }
                 "--rate-ws-per-min-mailbox" => {
                     cfg.rate_ws_per_min_mailbox =
-                        parse_num(&flag, &value("--rate-ws-per-min-mailbox")?)? as u32
+                        parse_num(&flag, &value("--rate-ws-per-min-mailbox")?)? as u32;
                 }
                 other => return Err(format!("unknown flag: {other}")),
             }

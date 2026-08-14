@@ -28,7 +28,13 @@ fn main() {
     .expect("generate self-signed test cert");
 
     let digest = ring::digest::digest(&ring::digest::SHA256, ck.cert.der().as_ref());
-    let pin: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    let pin: String = {
+        use std::fmt::Write;
+        digest.as_ref().iter().fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+    };
 
     std::fs::write(dir.join("cert.pem"), ck.cert.pem()).expect("write cert.pem");
     std::fs::write(dir.join("key.pem"), ck.signing_key.serialize_pem()).expect("write key.pem");

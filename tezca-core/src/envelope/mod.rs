@@ -42,6 +42,7 @@ pub struct Envelope {
 
 impl Envelope {
     /// Encodes the envelope to wire bytes.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(OUTER_HEADER_LEN + self.ciphertext.len());
         out.extend_from_slice(&MAGIC);

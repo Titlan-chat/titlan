@@ -52,7 +52,13 @@ fn gen_cert(dir: &TempDir) -> (std::path::PathBuf, std::path::PathBuf, String) {
     let ck = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])
         .expect("generate test cert");
     let digest = ring::digest::digest(&ring::digest::SHA256, ck.cert.der().as_ref());
-    let pin: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    let pin: String = {
+        use std::fmt::Write;
+        digest.as_ref().iter().fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+    };
     let cert = dir.path().join("cert.pem");
     let key = dir.path().join("key.pem");
     std::fs::write(&cert, ck.cert.pem()).expect("write cert");

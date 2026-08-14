@@ -39,6 +39,7 @@ uniffi::setup_scaffolding!();
 pub type Result<T> = std::result::Result<T, CoreError>;
 
 /// Returns the crate version. Single source of truth is `Cargo.toml`.
+#[must_use]
 pub fn core_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }

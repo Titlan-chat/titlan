@@ -34,6 +34,7 @@ impl DbKey {
     /// Generates a fresh key from the OS CSPRNG. The caller owns wrapping
     /// and storage (Android Keystore on-device; RAM only in tests). An OS
     /// whose CSPRNG fails is unrecoverable, hence the panic.
+    #[must_use]
     pub fn generate() -> Self {
         let mut bytes = [0u8; 32];
         rand::rngs::OsRng
@@ -43,6 +44,7 @@ impl DbKey {
     }
 
     /// Wraps existing key bytes (e.g. unwrapped by Android Keystore).
+    #[must_use]
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }

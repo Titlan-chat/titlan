@@ -99,12 +99,11 @@ fn parse_flags(args: &[String]) -> HashMap<String, String> {
 }
 
 fn required<'a>(flags: &'a HashMap<String, String>, key: &str) -> &'a str {
-    match flags.get(key) {
-        Some(v) => v,
-        None => {
-            eprintln!("missing required flag {key}");
-            usage_exit();
-        }
+    if let Some(v) = flags.get(key) {
+        v
+    } else {
+        eprintln!("missing required flag {key}");
+        usage_exit();
     }
 }
 
@@ -151,10 +150,9 @@ fn open_client(dir: &Path, relay: &str) -> TitlanClient {
 fn offer(flags: &HashMap<String, String>) {
     let dir = PathBuf::from(required(flags, "--dir"));
     let relay = required(flags, "--relay");
-    let wait_secs: u64 = flags
-        .get("--wait-secs")
-        .map(|s| s.parse().expect("--wait-secs must be a number"))
-        .unwrap_or(DEFAULT_WAIT_SECS);
+    let wait_secs: u64 = flags.get("--wait-secs").map_or(DEFAULT_WAIT_SECS, |s| {
+        s.parse().expect("--wait-secs must be a number")
+    });
 
     let client = open_client(&dir, relay);
     let before: HashSet<[u8; 16]> = client
@@ -203,30 +201,26 @@ fn respond(flags: &HashMap<String, String>) {
 fn send(flags: &HashMap<String, String>) {
     let dir = PathBuf::from(required(flags, "--dir"));
     let relay = required(flags, "--relay");
-    let text = flags
-        .get("--text")
-        .map(String::as_str)
-        .unwrap_or(DEFAULT_TEXT);
+    let text = flags.get("--text").map_or(DEFAULT_TEXT, String::as_str);
 
     let client = open_client(&dir, relay);
     let convs = client.list_conversations().expect("list conversations");
-    let conv: [u8; 16] = match flags.get("--conv") {
-        Some(h) => hex::decode(h.trim())
+    let conv: [u8; 16] = if let Some(h) = flags.get("--conv") {
+        hex::decode(h.trim())
             .expect("--conv is not hex")
             .try_into()
-            .expect("--conv must be 16 bytes of hex"),
-        None => {
-            if convs.len() != 1 {
-                eprintln!(
-                    "{} conversations in {} — pass --conv <hex-id> (pair first with \
-                     `offer`/`respond` if there are none)",
-                    convs.len(),
-                    dir.display()
-                );
-                std::process::exit(2);
-            }
-            convs[0]
+            .expect("--conv must be 16 bytes of hex")
+    } else {
+        if convs.len() != 1 {
+            eprintln!(
+                "{} conversations in {} — pass --conv <hex-id> (pair first with \
+                 `offer`/`respond` if there are none)",
+                convs.len(),
+                dir.display()
+            );
+            std::process::exit(2);
         }
+        convs[0]
     };
 
     println!("deposit-start epoch_ms={}", now_ms());

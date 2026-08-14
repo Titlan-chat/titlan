@@ -438,7 +438,7 @@ pub fn ws_next_message(ws: &mut WsClient) -> Result<([u8; 16], Vec<u8>), String>
                 id.copy_from_slice(&data[1..17]);
                 return Ok((id, data[17..].to_vec()));
             }
-            tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => continue,
+            tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => {}
             other => return Err(format!("unexpected ws message: {other:?}")),
         }
     }

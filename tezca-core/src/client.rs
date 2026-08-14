@@ -101,11 +101,13 @@ pub struct PairingPayload {
 
 impl PairingPayload {
     /// Wraps raw payload bytes (e.g. decoded from a scanned QR).
+    #[must_use]
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
         Self { bytes }
     }
 
     /// The raw payload bytes to encode into a QR / link fragment.
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }

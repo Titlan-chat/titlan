@@ -37,15 +37,12 @@ pub(crate) fn serialize(data: &BundleData) -> Vec<u8> {
     out.extend_from_slice(&data.kyber_prekey_id.to_be_bytes());
     put_bytes(&mut out, &data.kyber_prekey_pub);
     put_bytes(&mut out, &data.kyber_prekey_sig);
-    match &data.onetime_prekey {
-        Some((id, key)) => {
-            out.extend_from_slice(&id.to_be_bytes());
-            put_bytes(&mut out, key);
-        }
-        None => {
-            out.extend_from_slice(&ABSENT_ID.to_be_bytes());
-            put_bytes(&mut out, &[]);
-        }
+    if let Some((id, key)) = &data.onetime_prekey {
+        out.extend_from_slice(&id.to_be_bytes());
+        put_bytes(&mut out, key);
+    } else {
+        out.extend_from_slice(&ABSENT_ID.to_be_bytes());
+        put_bytes(&mut out, &[]);
     }
     out
 }

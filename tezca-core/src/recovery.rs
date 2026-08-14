@@ -141,7 +141,7 @@ impl GenerationState {
     /// Sender-side recovery: the peer generations `[peer_g … peer_g+(W-1)]` to
     /// PUT-CREATE (before depositing) and drop an idempotent `recovery-hello`
     /// into. Creating the peer inboxes first is load-bearing for the 2W bound.
-    pub(crate) fn outbound_window(&self) -> Vec<u32> {
+    pub(crate) fn outbound_window(self) -> Vec<u32> {
         (self.peer..self.peer.saturating_add(RECOVERY_WINDOW)).collect()
     }
 
@@ -151,18 +151,18 @@ impl GenerationState {
     pub(crate) fn converge(&mut self, peer_generation: u32) -> bool {
         self.peer = self.peer.max(peer_generation);
         let target = self.own.max(peer_generation);
-        if target != self.own {
+        if target == self.own {
+            false
+        } else {
             self.own = target;
             true
-        } else {
-            false
         }
     }
 
     /// `true` when the relative offset has reached the window `W` — the
     /// in-band-unrecoverable condition that raises
     /// [`crate::CoreError::ConversationNeedsRepair`].
-    pub(crate) fn is_exhausted(&self) -> bool {
+    pub(crate) fn is_exhausted(self) -> bool {
         self.own.abs_diff(self.peer) >= RECOVERY_WINDOW
     }
 }
@@ -192,7 +192,7 @@ impl ExhaustionTracker {
     }
 
     /// `true` once the probe-cycle bound is reached.
-    pub(crate) fn is_exhausted(&self) -> bool {
+    pub(crate) fn is_exhausted(self) -> bool {
         self.cycles >= RECOVERY_PROBE_CYCLES
     }
 }

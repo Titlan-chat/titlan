@@ -26,6 +26,7 @@ fn current_minute() -> u64 {
 }
 
 /// Seconds until the current fixed window rolls over (Retry-After value).
+#[must_use]
 pub fn retry_after_secs() -> u64 {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -81,6 +82,7 @@ pub struct SourceLimiter {
 }
 
 impl SourceLimiter {
+    #[must_use]
     pub fn new(cfg: &Config) -> Self {
         SourceLimiter {
             hasher: RandomState::new(),
@@ -150,6 +152,7 @@ pub struct BoxLimiter {
 }
 
 impl BoxLimiter {
+    #[must_use]
     pub fn new(cfg: &Config) -> Self {
         BoxLimiter {
             map: Mutex::new(HashMap::new()),

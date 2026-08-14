@@ -60,19 +60,18 @@ pub(super) async fn tls_connect(
     // no-pin (platform-trust) case, and only in test-relay-anchor builds.
     #[cfg(feature = "test-relay-anchor")]
     let pin = pin.or_else(env_test_pin);
-    let config = match pin {
-        Some(pin) => pinned_client_config(pin)?,
-        None => {
-            let provider = Arc::new(rustls::crypto::ring::default_provider());
-            let verifier = rustls_platform_verifier::Verifier::new(provider.clone())
-                .map_err(|e| CoreError::Network(format!("platform verifier: {e}")))?;
-            rustls::ClientConfig::builder_with_provider(provider)
-                .with_safe_default_protocol_versions()
-                .map_err(tls_err)?
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(verifier))
-                .with_no_client_auth()
-        }
+    let config = if let Some(pin) = pin {
+        pinned_client_config(pin)?
+    } else {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let verifier = rustls_platform_verifier::Verifier::new(provider.clone())
+            .map_err(|e| CoreError::Network(format!("platform verifier: {e}")))?;
+        rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(tls_err)?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
+            .with_no_client_auth()
     };
     let server_name = ServerName::try_from(host.to_owned())
         .map_err(|_| CoreError::Network("invalid relay hostname".into()))?;
@@ -185,7 +184,7 @@ mod tests {
             &[],
             &name,
             &[],
-            UnixTime::since_unix_epoch(std::time::Duration::from_secs(1_800_000_000)),
+            UnixTime::since_unix_epoch(std::time::Duration::from_hours(500_000)),
         );
         assert!(result.is_ok(), "cert matching the pin must be accepted");
     }
@@ -208,7 +207,7 @@ mod tests {
             &[],
             &name,
             &[],
-            UnixTime::since_unix_epoch(std::time::Duration::from_secs(1_800_000_000)),
+            UnixTime::since_unix_epoch(std::time::Duration::from_hours(500_000)),
         );
         let err = result.expect_err("cert not matching the pin must be rejected");
         assert!(

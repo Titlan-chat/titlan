@@ -630,7 +630,7 @@ fn scanner_session_cannot_decrypt_third_party_blob() {
     // Bob pairs with Alice and sends a secret → a genuine Bob→Alice blob.
     let alice_addr_for_bob =
         session::establish_session(&bob, &identity::export_prekey_bundle(&alice).unwrap()).unwrap();
-    let blob = session::encrypt_message(
+    let secret_blob = session::encrypt_message(
         &bob,
         &alice_addr_for_bob,
         &InnerFrame::chat_v1("top secret"),
@@ -639,7 +639,7 @@ fn scanner_session_cannot_decrypt_third_party_blob() {
     .unwrap();
     // Sanity: the intended recipient can read it.
     assert_eq!(
-        session::decrypt_message(&alice, &bob_addr, &blob, &profile)
+        session::decrypt_message(&alice, &bob_addr, &secret_blob, &profile)
             .unwrap()
             .into_chat_v1()
             .unwrap(),
@@ -651,7 +651,7 @@ fn scanner_session_cannot_decrypt_third_party_blob() {
     // blob, and attempts to decrypt it — it must fail (no shared ratchet keys).
     session::establish_session(&mallory, &identity::export_prekey_bundle(&bob).unwrap()).unwrap();
     assert!(
-        session::decrypt_message(&mallory, &bob_addr, &blob, &profile).is_err(),
+        session::decrypt_message(&mallory, &bob_addr, &secret_blob, &profile).is_err(),
         "a scanner's own session must not decrypt a third party's ciphertext"
     );
 }

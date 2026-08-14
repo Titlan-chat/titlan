@@ -26,6 +26,7 @@ pub fn apply() {
 }
 
 /// Test hook: verify the limits actually took (used by unit test + CI).
+#[must_use]
 pub fn core_limit_is_zero() -> bool {
     let lim = rustix::process::getrlimit(Resource::Core);
     lim.current == Some(0) && lim.maximum == Some(0)

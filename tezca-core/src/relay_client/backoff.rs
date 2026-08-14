@@ -31,8 +31,8 @@ impl Backoff {
         // LCG (Numerical Recipes constants).
         self.state = self
             .state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         let unit = (self.state >> 33) as f64 / (1u64 << 31) as f64; // [0,1)
         let jitter = 1.0 + (unit - 0.5) * 0.4; // ±20%
         Duration::from_secs_f64((base * jitter).max(0.05))

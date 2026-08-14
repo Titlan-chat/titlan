@@ -21,6 +21,7 @@ pub struct PaddingProfile {
 
 impl PaddingProfile {
     /// The default three-bucket profile (512 / 2048 / 8192).
+    #[must_use]
     pub fn default_profile() -> Self {
         Self::new(vec![512, 2048, 8192]).expect("default buckets are valid")
     }
@@ -42,22 +43,26 @@ impl PaddingProfile {
     }
 
     /// The bucket sizes, ascending.
+    #[must_use]
     pub fn buckets(&self) -> &[u32] {
         &self.buckets
     }
 
     /// Smallest bucket that holds an inner frame of `frame_len` bytes
     /// (header + payload, pre-padding), or `None` if it exceeds the largest.
+    #[must_use]
     pub fn bucket_for(&self, frame_len: u32) -> Option<u32> {
         self.buckets.iter().copied().find(|&b| b >= frame_len)
     }
 
     /// `true` if `len` is exactly one of the configured buckets.
+    #[must_use]
     pub fn is_bucket(&self, len: u32) -> bool {
         self.buckets.binary_search(&len).is_ok()
     }
 
     /// Maximum payload size this profile can carry.
+    #[must_use]
     pub fn max_payload(&self) -> u32 {
         self.buckets[self.buckets.len() - 1] - crate::envelope::INNER_HEADER_LEN as u32
     }

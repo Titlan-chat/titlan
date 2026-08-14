@@ -53,7 +53,7 @@ pub(crate) async fn create_mailbox(client: &Client, relay_url: &str) -> Result<S
     body.split("\"mailbox_id\"")
         .nth(1)
         .and_then(|s| s.split('"').nth(1))
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or(CoreError::Malformed("malformed mailbox-create response"))
 }
 

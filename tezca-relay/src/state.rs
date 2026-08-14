@@ -46,6 +46,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[must_use]
     pub fn new(cfg: Config) -> Self {
         AppState {
             src_limiter: SourceLimiter::new(&cfg),

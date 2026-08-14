@@ -22,6 +22,7 @@ use crate::storage::{DbKey, StoredMessage};
 /// Android Keystore on-device). The returned bytes cross the FFI once at
 /// birth; the Kotlin side wraps and zeroizes its copy.
 #[uniffi::export]
+#[must_use]
 pub fn generate_db_key() -> Vec<u8> {
     DbKey::generate().as_bytes().to_vec()
 }
