@@ -5,7 +5,7 @@
 //!
 //! Output policy (INV-2): the startup path may print fixed strings and
 //! usage errors to stderr; the serving path prints NOTHING, ever. The
-//! zero_knowledge acceptance tests and scripts/check-invariants.sh enforce
+//! `zero_knowledge` acceptance tests and scripts/check-invariants.sh enforce
 //! this mechanically.
 
 use std::net::SocketAddr;

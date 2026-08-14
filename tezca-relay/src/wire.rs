@@ -14,6 +14,7 @@ const VERSION: u8 = 0x01;
 const MIN_ENVELOPE: usize = 9;
 
 /// Deposit admission check: magic, version, and minimum length only.
+#[must_use]
 pub fn deposit_admissible(blob: &[u8]) -> bool {
     blob.len() >= MIN_ENVELOPE && &blob[..4] == MAGIC && blob[4] == VERSION
 }
@@ -21,6 +22,7 @@ pub fn deposit_admissible(blob: &[u8]) -> bool {
 /// Client→server WS ack frame: `0x02 || message_id(16)`. Returns the acked
 /// message id, or `None` for anything else (ignored, never an error path —
 /// a blind relay has nothing useful to say about garbage).
+#[must_use]
 pub fn parse_ack_frame(frame: &[u8]) -> Option<[u8; 16]> {
     if frame.len() != 17 || frame[0] != 0x02 {
         return None;
@@ -31,6 +33,7 @@ pub fn parse_ack_frame(frame: &[u8]) -> Option<[u8; 16]> {
 }
 
 /// Server→client WS delivery frame: `0x01 || message_id(16) || envelope`.
+#[must_use]
 pub fn delivery_frame(message_id: &[u8; 16], envelope: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(17 + envelope.len());
     out.push(0x01);
@@ -42,12 +45,13 @@ pub fn delivery_frame(message_id: &[u8; 16], envelope: &[u8]) -> Vec<u8> {
 const B64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /// Unpadded base64url of 32 bytes → 43 chars (mailbox id encoding).
+#[must_use]
 pub fn encode_mailbox_id(bytes: &[u8; 32]) -> String {
     let mut out = String::with_capacity(43);
     for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(*chunk.get(1).unwrap_or(&0));
+        let b2 = u32::from(*chunk.get(2).unwrap_or(&0));
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(B64URL[(n >> 18) as usize & 63] as char);
         out.push(B64URL[(n >> 12) as usize & 63] as char);
@@ -64,6 +68,7 @@ pub fn encode_mailbox_id(bytes: &[u8; 32]) -> String {
 /// Shape check for a mailbox id path segment. Anything malformed is treated
 /// as an unknown mailbox (404) — never a distinct error (indistinguishable
 /// from expired/deleted by design).
+#[must_use]
 pub fn mailbox_id_shape_ok(id: &str) -> bool {
     id.len() == 43 && id.bytes().all(|b| B64URL.contains(&b))
 }

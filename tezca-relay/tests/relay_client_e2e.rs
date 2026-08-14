@@ -4,7 +4,7 @@
 //! Phase 4a acceptance: tezca-core's `TitlanClient` relay client driven
 //! end-to-end against the real relay server (Phase 3 harness). Lives in
 //! tezca-relay because both halves are here — the relay binary
-//! (CARGO_BIN_EXE) and tezca-core (dev-dependency).
+//! (`CARGO_BIN_EXE`) and tezca-core (dev-dependency).
 //!
 //! RED state: the pairing/sync/send/recovery/pin surface is `todo!()` in
 //! tezca-core, so these fail at runtime (not at build). The green
@@ -420,7 +420,7 @@ fn v2_message_queued_while_relay_down_delivers_after_recovery() {
 }
 
 /// (iv) ack-after-persist: a delivered message is written to the encrypted
-/// SQLCipher store BEFORE the relay is acked and before the UI callback, so a
+/// `SQLCipher` store BEFORE the relay is acked and before the UI callback, so a
 /// process death between persist and callback loses nothing — the message is
 /// already durable and rehydrates on restart. Here we assert the message is in
 /// the store (`messages()`), independent of the transient callback.
@@ -630,7 +630,7 @@ fn scanner_session_cannot_decrypt_third_party_blob() {
     // Bob pairs with Alice and sends a secret → a genuine Bob→Alice blob.
     let alice_addr_for_bob =
         session::establish_session(&bob, &identity::export_prekey_bundle(&alice).unwrap()).unwrap();
-    let blob = session::encrypt_message(
+    let secret_blob = session::encrypt_message(
         &bob,
         &alice_addr_for_bob,
         &InnerFrame::chat_v1("top secret"),
@@ -639,7 +639,7 @@ fn scanner_session_cannot_decrypt_third_party_blob() {
     .unwrap();
     // Sanity: the intended recipient can read it.
     assert_eq!(
-        session::decrypt_message(&alice, &bob_addr, &blob, &profile)
+        session::decrypt_message(&alice, &bob_addr, &secret_blob, &profile)
             .unwrap()
             .into_chat_v1()
             .unwrap(),
@@ -651,7 +651,7 @@ fn scanner_session_cannot_decrypt_third_party_blob() {
     // blob, and attempts to decrypt it — it must fail (no shared ratchet keys).
     session::establish_session(&mallory, &identity::export_prekey_bundle(&bob).unwrap()).unwrap();
     assert!(
-        session::decrypt_message(&mallory, &bob_addr, &blob, &profile).is_err(),
+        session::decrypt_message(&mallory, &bob_addr, &secret_blob, &profile).is_err(),
         "a scanner's own session must not decrypt a third party's ciphertext"
     );
 }

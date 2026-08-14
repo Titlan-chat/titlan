@@ -137,7 +137,7 @@ fn relay_never_writes_to_storage() {
     // …and its working directory stays empty.
     let leftovers: Vec<_> = std::fs::read_dir(dir.path())
         .expect("read cwd")
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| {
             let name = e.file_name();
             let name = name.to_string_lossy();

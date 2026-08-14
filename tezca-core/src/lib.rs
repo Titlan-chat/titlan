@@ -15,7 +15,7 @@
 //! - [`config`]: padding profiles; the single default relay constant (INV-5)
 //! - [`licensing`]: deferred licensing trait + `AlwaysLicensed` stub (§5)
 //!
-//! Kotlin consumes this crate through UniFFI bindings (A3, Phase 4); Kotlin
+//! Kotlin consumes this crate through `UniFFI` bindings (A3, Phase 4); Kotlin
 //! stays UI-only.
 
 pub mod client;
@@ -39,6 +39,7 @@ uniffi::setup_scaffolding!();
 pub type Result<T> = std::result::Result<T, CoreError>;
 
 /// Returns the crate version. Single source of truth is `Cargo.toml`.
+#[must_use]
 pub fn core_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }

@@ -46,16 +46,14 @@ pub(crate) async fn subscribe(
     mailbox_id: &str,
     pin: Option<[u8; 32]>,
 ) -> Connected {
-    let (scheme, authority) = match relay_url.split_once("://") {
-        Some((s, a)) => (s, a),
-        None => return Connected::Unreachable,
+    let Some((scheme, authority)) = relay_url.split_once("://") else {
+        return Connected::Unreachable;
     };
     let host = authority.split(':').next().unwrap_or(authority).to_string();
     let ws_url = format!("{relay_url}/v1/mailboxes/{mailbox_id}/ws");
 
-    let tcp = match TcpStream::connect(authority).await {
-        Ok(s) => s,
-        Err(_) => return Connected::Unreachable,
+    let Ok(tcp) = TcpStream::connect(authority).await else {
+        return Connected::Unreachable;
     };
 
     let stream: Box<dyn ClientIo> = if scheme == "wss" {
@@ -92,7 +90,7 @@ impl Subscription {
                     let _ = self.ws.send(Message::Pong(p)).await;
                 }
                 Some(Ok(Message::Close(_))) | None => return Ok(None),
-                Some(Ok(_)) => continue,
+                Some(Ok(_)) => {}
                 Some(Err(e)) => return Err(CoreError::Network(e.to_string())),
             }
         }

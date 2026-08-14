@@ -10,6 +10,7 @@
 
 mod inner;
 
+pub(crate) use inner::INNER_HEADER_LEN_U32;
 pub use inner::{INNER_HEADER_LEN, InnerFrame, PayloadType};
 
 use crate::{CoreError, Result};
@@ -42,6 +43,7 @@ pub struct Envelope {
 
 impl Envelope {
     /// Encodes the envelope to wire bytes.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(OUTER_HEADER_LEN + self.ciphertext.len());
         out.extend_from_slice(&MAGIC);
@@ -54,6 +56,13 @@ impl Envelope {
 
     /// Parses wire bytes. Every failure is a typed, clean rejection (INV-4);
     /// this function must never panic on any input (fuzz target).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`] (too short, bad magic),
+    /// [`CoreError::UnsupportedVersion`], [`CoreError::UnknownEnvelopeKind`],
+    /// or [`CoreError::ReservedMustBeZero`] — every failure a typed, clean
+    /// rejection.
     pub fn parse(bytes: &[u8]) -> Result<Envelope> {
         // Header plus at least one ciphertext byte.
         if bytes.len() <= OUTER_HEADER_LEN {

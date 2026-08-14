@@ -44,6 +44,17 @@ fn now_timestamp() -> Timestamp {
 /// Generates the local identity, registration id, and initial prekey set
 /// (signed + kyber + one one-time prekey), persisting them in `store`.
 /// Errors if an identity already exists.
+///
+/// # Errors
+///
+/// Returns [`CoreError::Storage`] if an identity already exists or persistence
+/// fails, and [`CoreError::Signal`] for libsignal record
+/// construction/serialization failures.
+///
+/// # Panics
+///
+/// Panics if the OS CSPRNG cannot provide entropy, or if the store mutex is
+/// poisoned.
 pub fn initialize(store: &Store) -> Result<()> {
     if is_initialized(store)? {
         return Err(CoreError::Storage("identity already initialized".into()));
@@ -137,6 +148,14 @@ pub(crate) fn address_for_identity(identity_key: &libsignal_protocol::IdentityKe
 }
 
 /// `true` once [`initialize`] has completed for this store.
+///
+/// # Errors
+///
+/// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query fails.
+///
+/// # Panics
+///
+/// Panics if the store mutex is poisoned (a prior panic while holding it).
 pub fn is_initialized(store: &Store) -> Result<bool> {
     let conn = store.conn.lock().expect("store mutex poisoned");
     let count: u32 = conn
@@ -146,6 +165,15 @@ pub fn is_initialized(store: &Store) -> Result<bool> {
 }
 
 /// The local pairing address (stable pseudonym carried in exported bundles).
+///
+/// # Errors
+///
+/// Returns [`CoreError::Storage`] when the query fails — including on a store
+/// whose identity was never initialized (`QueryReturnedNoRows`).
+///
+/// # Panics
+///
+/// Panics if the store mutex is poisoned (a prior panic while holding it).
 pub fn local_address(store: &Store) -> Result<String> {
     let conn = store.conn.lock().expect("store mutex poisoned");
     conn.query_row(
@@ -158,8 +186,8 @@ pub fn local_address(store: &Store) -> Result<String> {
 
 /// Serializes a pairing bundle (`proto/pairing.md`, A7) advertising the
 /// long-lived identity/signed/kyber material plus the given one-time prekey
-/// `(id, public)`. Shared by the offer path ([export_offer_bundle]) and the
-/// responder `pair-ack/2` path ([export_prekey_bundle]).
+/// `(id, public)`. Shared by the offer path ([`export_offer_bundle`]) and the
+/// responder `pair-ack/2` path ([`export_prekey_bundle`]).
 fn serialize_bundle(store: &Store, onetime: (u32, Vec<u8>)) -> Result<Vec<u8>> {
     let address_name = local_address(store)?;
     let (registration_id, identity_bytes) = {
@@ -214,10 +242,20 @@ fn serialize_bundle(store: &Store, onetime: (u32, Vec<u8>)) -> Result<Vec<u8>> {
 }
 
 /// Exports the bundle for a responder's `pair-ack/2` (A7). It advertises the
-/// fixed init one-time prekey [ONETIME_PREKEY_ID]: the offerer never runs PQXDH
+/// fixed init one-time prekey [`ONETIME_PREKEY_ID`]: the offerer never runs PQXDH
 /// against the responder's bundle (it ratchets its inbox-handoff on the session
 /// the responder's `pair-ack/2` already established), so this prekey is never
 /// consumed and is safely reused across pair-acks.
+///
+/// # Errors
+///
+/// Returns [`CoreError::Storage`] when the fixed responder prekey row is
+/// missing (never-initialized store) or a query fails, and
+/// [`CoreError::Signal`] when libsignal record deserialization fails.
+///
+/// # Panics
+///
+/// Panics if the store mutex is poisoned (a prior panic while holding it).
 pub fn export_prekey_bundle(store: &Store) -> Result<Vec<u8>> {
     let onetime_public = {
         let conn = store.conn.lock().expect("store mutex poisoned");
@@ -244,8 +282,13 @@ pub fn export_prekey_bundle(store: &Store) -> Result<Vec<u8>> {
 /// later processes a responder's `pair-ack/2`, libsignal's `remove_pre_key`
 /// deletes exactly that offer's prekey, leaving every other live offer — and
 /// every future offer — its own. Without this the single fixed
-/// [ONETIME_PREKEY_ID] is deleted on the first inbound pairing and a device can
+/// [`ONETIME_PREKEY_ID`] is deleted on the first inbound pairing and a device can
 /// be paired into only once per identity.
+///
+/// # Errors
+///
+/// Returns [`CoreError::Storage`]/[`CoreError::Signal`] errors minting and
+/// persisting the fresh per-offer prekey or serializing the bundle.
 pub fn export_offer_bundle(store: &Store) -> Result<Vec<u8>> {
     let onetime = mint_offer_onetime_prekey(store)?;
     serialize_bundle(store, onetime)

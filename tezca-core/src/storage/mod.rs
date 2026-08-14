@@ -21,7 +21,7 @@ use crate::envelope::InnerFrame;
 use crate::storage::schema::sql_err;
 use crate::{CoreError, Result};
 
-/// A 32-byte SQLCipher database key. Zeroized on drop.
+/// A 32-byte `SQLCipher` database key. Zeroized on drop.
 pub struct DbKey([u8; 32]);
 
 impl Drop for DbKey {
@@ -34,6 +34,12 @@ impl DbKey {
     /// Generates a fresh key from the OS CSPRNG. The caller owns wrapping
     /// and storage (Android Keystore on-device; RAM only in tests). An OS
     /// whose CSPRNG fails is unrecoverable, hence the panic.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the OS CSPRNG cannot provide entropy — unrecoverable by design
+    /// (see above).
+    #[must_use]
     pub fn generate() -> Self {
         let mut bytes = [0u8; 32];
         rand::rngs::OsRng
@@ -43,6 +49,7 @@ impl DbKey {
     }
 
     /// Wraps existing key bytes (e.g. unwrapped by Android Keystore).
+    #[must_use]
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
@@ -100,7 +107,7 @@ pub struct Conversation {
 /// mean "not a v2 recovery-capable conversation" or "not yet established".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RecoveryRecord {
-    /// 0 = offerer, 1 = responder (the derived-mailbox role_label); `None` for
+    /// 0 = offerer, 1 = responder (the derived-mailbox `role_label`); `None` for
     /// v1-paired conversations.
     pub role: Option<u8>,
     /// This side's 32-byte recovery-root contribution.
@@ -115,7 +122,7 @@ pub(crate) struct RecoveryRecord {
     pub peer_gen: u32,
 }
 
-/// An open, keyed SQLCipher store.
+/// An open, keyed `SQLCipher` store.
 pub struct Store {
     pub(crate) conn: Mutex<rusqlite::Connection>,
 }
@@ -124,6 +131,12 @@ impl Store {
     /// Opens (creating if absent) the database at `path` with `key`, applies
     /// pending migrations, and verifies the key. A wrong key yields
     /// [`CoreError::BadDbKey`] — cleanly, with no partial state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::BadDbKey`] when the key does not decrypt the
+    /// database, and [`CoreError::Storage`] for any other open or migration
+    /// failure.
     pub fn open(path: &Path, key: &DbKey) -> Result<Store> {
         let conn = rusqlite::Connection::open(path).map_err(sql_err)?;
 
@@ -151,6 +164,15 @@ impl Store {
     }
 
     /// Current schema version (max applied migration).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn schema_version(&self) -> Result<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -163,6 +185,15 @@ impl Store {
 
     /// Creates a conversation with `peer_address`. `relay_url = None` fills
     /// the single default constant (INV-5). Returns the conversation id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn create_conversation(
         &self,
         peer_address: &str,
@@ -181,6 +212,15 @@ impl Store {
     }
 
     /// The relay URL configured for a conversation (INV-5: per-conversation).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query fails
+    /// — including when no row exists for the given id (`QueryReturnedNoRows`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn conversation_relay_url(&self, conversation_id: &[u8; 16]) -> Result<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -192,6 +232,15 @@ impl Store {
     }
 
     /// Persists a message body for a conversation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn save_message(
         &self,
         conversation_id: &[u8; 16],
@@ -218,6 +267,15 @@ impl Store {
     }
 
     /// Finds an existing conversation by peer address.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn conversation_by_peer(&self, peer_address: &str) -> Result<Option<[u8; 16]>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         match conn.query_row(
@@ -232,6 +290,15 @@ impl Store {
     }
 
     /// Reads a conversation's routing row.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn get_conversation(&self, id: &[u8; 16]) -> Result<Option<Conversation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         match conn.query_row(
@@ -256,6 +323,15 @@ impl Store {
     }
 
     /// Lists conversation ids, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn list_conversation_ids(&self) -> Result<Vec<[u8; 16]>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn
@@ -270,6 +346,15 @@ impl Store {
 
     /// Creates a conversation with explicit routing (mailboxes may be unknown
     /// until the peer replies). Returns the id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn create_routed_conversation(
         &self,
         peer_address: &str,
@@ -297,6 +382,15 @@ impl Store {
 
     /// Updates where to send for a conversation (peer's relay + inbox), learned
     /// from a `pair-ack/1` or `mailbox-update/1`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn set_conversation_send(
         &self,
         id: &[u8; 16],
@@ -313,6 +407,15 @@ impl Store {
     }
 
     /// Overrides the peer relay URL for a conversation (INV-5).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn set_conversation_relay(&self, id: &[u8; 16], relay: &str) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -324,6 +427,15 @@ impl Store {
     }
 
     /// Updates this side's receive inbox (used by §10.7 one-sided recovery).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn set_conversation_recv(&self, id: &[u8; 16], mailbox_recv: &str) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -335,6 +447,15 @@ impl Store {
     }
 
     /// Sets or clears the per-conversation TLS SPKI pin (schema v2).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn set_conversation_pin(&self, id: &[u8; 16], pin: Option<[u8; 32]>) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -346,6 +467,15 @@ impl Store {
     }
 
     /// Reads the per-conversation TLS SPKI pin.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query fails
+    /// — including when no row exists for the given id (`QueryReturnedNoRows`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn conversation_pin(&self, id: &[u8; 16]) -> Result<Option<[u8; 32]>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -367,12 +497,15 @@ impl Store {
             [id.as_slice()],
             |row| {
                 Ok(RecoveryRecord {
-                    role: row.get::<_, Option<i64>>(0)?.map(|r| r as u8),
+                    // rusqlite's FromSql for u8/u32 is range-checked: an
+                    // out-of-range column value becomes a conversion error
+                    // on the existing rusqlite error channel (sql_err).
+                    role: row.get::<_, Option<u8>>(0)?,
                     own_contrib: row.get::<_, Option<Vec<u8>>>(1)?.map(|v| blob32(&v)),
                     peer_contrib: row.get::<_, Option<Vec<u8>>>(2)?.map(|v| blob32(&v)),
                     root: row.get::<_, Option<Vec<u8>>>(3)?.map(|v| blob32(&v)),
-                    own_gen: row.get::<_, i64>(4)? as u32,
-                    peer_gen: row.get::<_, i64>(5)? as u32,
+                    own_gen: row.get::<_, u32>(4)?,
+                    peer_gen: row.get::<_, u32>(5)?,
                 })
             },
         ) {
@@ -393,7 +526,7 @@ impl Store {
         conn.execute(
             "UPDATE conversations
                SET recovery_role = ?2, recovery_own_contrib = ?3 WHERE id = ?1",
-            rusqlite::params![id.as_slice(), role as i64, own_contrib.as_slice()],
+            rusqlite::params![id.as_slice(), i64::from(role), own_contrib.as_slice()],
         )
         .map_err(sql_err)?;
         Ok(())
@@ -428,13 +561,18 @@ impl Store {
         conn.execute(
             "UPDATE conversations
                SET recovery_own_gen = ?2, recovery_peer_gen = ?3 WHERE id = ?1",
-            rusqlite::params![id.as_slice(), own_gen as i64, peer_gen as i64],
+            rusqlite::params![id.as_slice(), i64::from(own_gen), i64::from(peer_gen)],
         )
         .map_err(sql_err)?;
         Ok(())
     }
 
     /// Saves an outgoing message as `pending` (status 0). Returns its id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
     pub fn save_outgoing(
         &self,
         conversation_id: &[u8; 16],
@@ -444,6 +582,11 @@ impl Store {
     }
 
     /// Saves an incoming (already decrypted) message as `received` (status 2).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
     pub fn save_incoming(
         &self,
         conversation_id: &[u8; 16],
@@ -480,6 +623,15 @@ impl Store {
     }
 
     /// Marks a message as sent (status 1).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn mark_message_sent(&self, message_id: &[u8; 16]) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -491,6 +643,16 @@ impl Store {
     }
 
     /// Pending outgoing chat frames for a conversation (for redelivery).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails, or [`CoreError::UnknownPayloadType`] when a stored payload-type
+    /// byte is outside the registry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn pending_chat(&self, conversation_id: &[u8; 16]) -> Result<Vec<([u8; 16], InnerFrame)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn
@@ -526,6 +688,15 @@ impl Store {
     }
 
     /// Lists messages of a conversation in insertion order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn list_messages(&self, conversation_id: &[u8; 16]) -> Result<Vec<StoredMessage>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn
@@ -654,7 +825,7 @@ mod v1_to_v3_migration_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("v1.db");
         let key = DbKey::generate();
-        let conv_id: [u8; 16] = std::array::from_fn(|i| i as u8);
+        let conv_id: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).expect("index < 16"));
         let msg_id = [0xEEu8; 16];
 
         // Build the v1 database exactly as Phase 2 created it: a keyed

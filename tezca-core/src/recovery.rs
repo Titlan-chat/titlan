@@ -5,7 +5,7 @@
 //! 2026-07-19, maintainer-ratified B1/B2).
 //!
 //! Both mailboxes of a conversation share a relay, so a relay restart is TOTAL
-//! routing loss while the Double Ratchet state survives in SQLCipher on both
+//! routing loss while the Double Ratchet state survives in `SQLCipher` on both
 //! ends. Recovery re-establishes routing WITHOUT re-pairing by deriving a
 //! per-conversation sequence of unguessable mailbox IDs and converging both
 //! parties onto the same generation.
@@ -111,9 +111,9 @@ fn base64url_nopad(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(*chunk.get(1).unwrap_or(&0));
+        let b2 = u32::from(*chunk.get(2).unwrap_or(&0));
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
         out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
@@ -141,7 +141,7 @@ impl GenerationState {
     /// Sender-side recovery: the peer generations `[peer_g … peer_g+(W-1)]` to
     /// PUT-CREATE (before depositing) and drop an idempotent `recovery-hello`
     /// into. Creating the peer inboxes first is load-bearing for the 2W bound.
-    pub(crate) fn outbound_window(&self) -> Vec<u32> {
+    pub(crate) fn outbound_window(self) -> Vec<u32> {
         (self.peer..self.peer.saturating_add(RECOVERY_WINDOW)).collect()
     }
 
@@ -151,18 +151,18 @@ impl GenerationState {
     pub(crate) fn converge(&mut self, peer_generation: u32) -> bool {
         self.peer = self.peer.max(peer_generation);
         let target = self.own.max(peer_generation);
-        if target != self.own {
+        if target == self.own {
+            false
+        } else {
             self.own = target;
             true
-        } else {
-            false
         }
     }
 
     /// `true` when the relative offset has reached the window `W` — the
     /// in-band-unrecoverable condition that raises
     /// [`crate::CoreError::ConversationNeedsRepair`].
-    pub(crate) fn is_exhausted(&self) -> bool {
+    pub(crate) fn is_exhausted(self) -> bool {
         self.own.abs_diff(self.peer) >= RECOVERY_WINDOW
     }
 }
@@ -192,7 +192,7 @@ impl ExhaustionTracker {
     }
 
     /// `true` once the probe-cycle bound is reached.
-    pub(crate) fn is_exhausted(&self) -> bool {
+    pub(crate) fn is_exhausted(self) -> bool {
         self.cycles >= RECOVERY_PROBE_CYCLES
     }
 }

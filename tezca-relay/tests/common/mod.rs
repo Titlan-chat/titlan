@@ -8,10 +8,10 @@
 //!
 //! The flag names used here are the relay's configuration contract; the
 //! implementation must accept exactly these. The relay must set
-//! SO_REUSEADDR so the kill/restart test can rebind the same port.
+//! `SO_REUSEADDR` so the kill/restart test can rebind the same port.
 //!
 //! Each `tests/*.rs` file is its own crate and compiles this whole module,
-//! so helpers a given test binary doesn't use would trip dead_code — hence
+//! so helpers a given test binary doesn't use would trip `dead_code` — hence
 //! the crate-wide allow on this shared harness.
 #![allow(dead_code)]
 
@@ -192,7 +192,7 @@ fn relay_healthy(port: u16) -> bool {
 /// instead of --plain-http. Readiness: the plaintext /healthz probe cannot
 /// speak TLS, so the gate is TCP-accept + child-alive; the caller's first
 /// real client operation is the authoritative check. This file's TLS test
-/// runs alone in its binary, so the free_port hand-off race the plain-HTTP
+/// runs alone in its binary, so the `free_port` hand-off race the plain-HTTP
 /// probe defends against does not arise here.
 pub fn spawn_relay_tls_at(
     port: u16,
@@ -425,7 +425,7 @@ pub fn ws_subscribe(base: &str, mailbox_id: &str) -> Result<WsClient, String> {
     Ok(ws)
 }
 
-/// Reads one delivery frame; returns (message_id, envelope bytes).
+/// Reads one delivery frame; returns (`message_id`, envelope bytes).
 pub fn ws_next_message(ws: &mut WsClient) -> Result<([u8; 16], Vec<u8>), String> {
     loop {
         let msg = ws.read().map_err(|e| e.to_string())?;
@@ -438,7 +438,7 @@ pub fn ws_next_message(ws: &mut WsClient) -> Result<([u8; 16], Vec<u8>), String>
                 id.copy_from_slice(&data[1..17]);
                 return Ok((id, data[17..].to_vec()));
             }
-            tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => continue,
+            tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => {}
             other => return Err(format!("unexpected ws message: {other:?}")),
         }
     }

@@ -270,7 +270,7 @@ async fn deliver(state: Arc<AppState>, id: String, mut socket: WebSocket) {
                             }
                         }
                     }
-                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
+                    Some(Ok(Message::Close(_)) | Err(_)) | None => return,
                     Some(Ok(_)) => {} // ping/pong/text: ignore
                 }
             }

@@ -86,6 +86,22 @@ curve25519-dalek = { git = "https://github.com/signalapp/curve25519-dalek", tag 
 unsafe_code = "deny"
 missing_docs = "warn"
 
+# F2 CONFIRMED-A (ratified 2026-08-05, eyes-open against the reviewer rec):
+# the FULL clippy::pedantic group gates CI. Per-lint allows below are the
+# complete justified set (p5-5b1-pedantic report enumerates every site);
+# extending this list is a maintainer decision, not a drive-by.
+[workspace.lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+# UniFFI-exported signatures take owned String/Vec<u8> by FFI contract (9
+# sites), and the point-free map_err/map adapter helpers (5 sites, 72 call
+# sites) are the intended by-value shape — fixing either would change the
+# exported API or trade point-free adapters for closure wrappers.
+needless_pass_by_value = "allow"
+# Two sites: conversation_listener's S3 cancellation state machine (splitting
+# would obscure the unraced persist->ack span its doc comment proves) and the
+# linear populated-v1 migration-test fixture. Length is structural there.
+too_many_lines = "allow"
+
 [profile.release]
 # Strip symbols: smaller artifacts and fewer host-path strings embedded in the
 # binary, which the reproducible-build pipeline (scripts/repro-build.sh) relies on.

@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
 
 //! §6 Phase 3 acceptance: two real tezca-core instances exchange 1,000
-//! messages through a REAL relay process; the relay is SIGKILLed and
+//! messages through a REAL relay process; the relay is `SIGKILLed` and
 //! restarted mid-test with client retry recovering cleanly; memory stays
 //! flat under sustained load.
 //!
@@ -272,8 +272,13 @@ fn memory_stays_flat_under_sustained_load() {
     // Unconditional magnitudes (pass AND fail). libtest captures stdout unless
     // the run passes `--nocapture`; on a failing run the assert dumps captured
     // stdout anyway, so these lines are always available where the outcome is.
-    let delta_kb = after as i64 - steady as i64;
-    let growth_pct = delta_kb as f64 / steady as f64 * 100.0;
+    // RSS figures are kB counts well under u32::MAX; the checked u32 hop
+    // makes the i64/f64 conversions provably lossless.
+    let delta_kb = i64::from(u32::try_from(after).expect("RSS kB fits u32"))
+        - i64::from(u32::try_from(steady).expect("RSS kB fits u32"));
+    let growth_pct = f64::from(i32::try_from(delta_kb).expect("delta kB fits i32"))
+        / f64::from(u32::try_from(steady).expect("RSS kB fits u32"))
+        * 100.0;
     println!(
         "MEMFLAT steady_kb={steady} after_kb={after} delta_kb={delta_kb} growth_pct={growth_pct:.2}"
     );
@@ -344,7 +349,7 @@ fn settled_rss(relay: &common::RelayProc) -> u64 {
 }
 
 /// INV-3 positive lock assertion (G2.ii ratified 2026-08-10): when the
-/// environment grants RLIMIT_MEMLOCK, the relay's best-effort
+/// environment grants `RLIMIT_MEMLOCK`, the relay's best-effort
 /// `mlockall(CURRENT|FUTURE)` (hardening.rs) must actually pin pages —
 /// `VmLck` in `/proc/<pid>/status` strictly positive on the live child.
 /// When the environment denies memlock, SKIP cleanly with a printed reason

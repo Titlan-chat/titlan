@@ -31,9 +31,11 @@ impl Backoff {
         // LCG (Numerical Recipes constants).
         self.state = self
             .state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        let unit = (self.state >> 33) as f64 / (1u64 << 31) as f64; // [0,1)
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        // 64 - 33 = 31 significant bits: fits u32 (and f64) exactly.
+        let hi31 = u32::try_from(self.state >> 33).expect("31-bit value fits u32");
+        let unit = f64::from(hi31) / f64::from(1u32 << 31); // [0,1)
         let jitter = 1.0 + (unit - 0.5) * 0.4; // ±20%
         Duration::from_secs_f64((base * jitter).max(0.05))
     }
@@ -44,6 +46,10 @@ impl Backoff {
     }
 
     /// Whole seconds of the current step (for the Backoff connection state).
+    // Intentional whole-second truncation of a float bounded to
+    // [0.05, max_secs] — always non-negative, far below u32::MAX; no
+    // checked float→int conversion exists to express this instead.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub(crate) fn current_secs(&self) -> u32 {
         self.current_secs as u32
     }

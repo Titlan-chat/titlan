@@ -14,6 +14,9 @@ use crate::{CoreError, Result};
 
 /// Inner-frame header length in bytes.
 pub const INNER_HEADER_LEN: usize = 6;
+/// [`INNER_HEADER_LEN`] as `u32` for bucket arithmetic.
+pub(crate) const INNER_HEADER_LEN_U32: u32 = 6;
+const _: () = assert!(INNER_HEADER_LEN == INNER_HEADER_LEN_U32 as usize);
 
 /// Payload type registry (normative registry lives in `proto/envelope.md`).
 ///
@@ -55,6 +58,7 @@ pub struct InnerFrame {
 
 impl InnerFrame {
     /// Convenience constructor for `chat/1` frames.
+    #[must_use]
     pub fn chat_v1(text: &str) -> Self {
         Self {
             payload_type: PayloadType::Chat,
@@ -67,6 +71,12 @@ impl InnerFrame {
     ///
     /// Fails with [`CoreError::PayloadTooLarge`] BEFORE any cryptographic
     /// operation if the payload exceeds the largest bucket.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`] when the payload length exceeds `u32`
+    /// or no bucket fits the frame, and [`CoreError::PayloadTooLarge`] when it
+    /// exceeds the profile's largest bucket.
     pub fn encode(&self, profile: &PaddingProfile) -> Result<Vec<u8>> {
         let len = u32::try_from(self.payload.len())
             .map_err(|_| CoreError::Malformed("payload exceeds u32"))?;
@@ -74,7 +84,7 @@ impl InnerFrame {
         if len > max {
             return Err(CoreError::PayloadTooLarge { len, max });
         }
-        let frame_len = INNER_HEADER_LEN as u32 + len;
+        let frame_len = INNER_HEADER_LEN_U32 + len;
         let bucket = profile
             .bucket_for(frame_len)
             .ok_or(CoreError::Malformed("no bucket fits frame"))?;
@@ -90,6 +100,18 @@ impl InnerFrame {
     /// Parses a decrypted frame. Strict: total length must be exactly one
     /// configured bucket, declared length must fit, and every padding byte
     /// must be zero. Never panics on any input (fuzz target).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::InvalidBucket`] for a non-bucket length,
+    /// [`CoreError::UnknownPayloadType`] for an unregistered type byte, and
+    /// [`CoreError::Malformed`]/[`CoreError::InvalidPadding`] for declared-
+    /// length or padding violations.
+    ///
+    /// # Panics
+    ///
+    /// Never panics on any input (fuzz target): the single internal `expect`
+    /// converts a fixed-width slice and is statically unreachable.
     pub fn parse(bytes: &[u8], profile: &PaddingProfile) -> Result<InnerFrame> {
         let frame_len =
             u32::try_from(bytes.len()).map_err(|_| CoreError::Malformed("frame exceeds u32"))?;
@@ -125,6 +147,12 @@ impl InnerFrame {
     /// Registry-valid non-chat types yield
     /// [`CoreError::RecognizedButUnsupported`] — ack-and-drop material, not a
     /// protocol violation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`] for a non-UTF-8 `chat/1` payload and
+    /// [`CoreError::RecognizedButUnsupported`] for registry-valid non-`chat/1`
+    /// frames.
     pub fn into_chat_v1(self) -> Result<String> {
         match (self.payload_type, self.type_version) {
             (PayloadType::Chat, 1) => String::from_utf8(self.payload)

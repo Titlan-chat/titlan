@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
 
-//! UniFFI surface (A3): the Kotlin-facing wrapper over [`crate::client`].
+//! `UniFFI` surface (A3): the Kotlin-facing wrapper over [`crate::client`].
 //! Bindings are generated in Phase 4b; the Rust integration tests exercise the
 //! underlying [`crate::client::TitlanClient`] directly. Fixed-size ids/keys
 //! cross the FFI as `Vec<u8>` (16 or 32 bytes); the wrapper converts.
@@ -22,6 +22,7 @@ use crate::storage::{DbKey, StoredMessage};
 /// Android Keystore on-device). The returned bytes cross the FFI once at
 /// birth; the Kotlin side wraps and zeroizes its copy.
 #[uniffi::export]
+#[must_use]
 pub fn generate_db_key() -> Vec<u8> {
     DbKey::generate().as_bytes().to_vec()
 }
@@ -156,6 +157,12 @@ impl FfiClient {
     /// Opens the encrypted store at `db_path` with a 32-byte `db_key`.
     /// The FFI-side transient copies of the key are zeroized before
     /// returning (INV-1 hygiene; [`DbKey`] itself zeroizes on drop).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TitlanError::Other`] when `db_key` is not exactly 32 bytes,
+    /// otherwise the [`CoreError`] mapping from opening the store (bad key,
+    /// storage failures).
     #[uniffi::constructor]
     pub fn open(
         db_path: String,
@@ -174,20 +181,41 @@ impl FfiClient {
         Ok(Arc::new(FfiClient { inner }))
     }
 
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError`] mapping: storage errors (including an already-
+    /// initialized identity) and libsignal key-generation failures.
     pub fn initialize_identity(&self) -> std::result::Result<(), TitlanError> {
         Ok(self.inner.initialize_identity()?)
     }
 
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError`] mapping of storage query failures.
     pub fn is_initialized(&self) -> std::result::Result<bool, TitlanError> {
         Ok(self.inner.is_initialized()?)
     }
 
     /// v2 asymmetric offer export (proof-of-scan + derived-recovery pairing).
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError`] mapping: storage/libsignal bundle-export
+    /// errors and [`TitlanError::Network`] when setting up the pairing inbox
+    /// fails.
     pub fn export_pairing_offer(&self) -> std::result::Result<Vec<u8>, TitlanError> {
         Ok(self.inner.export_pairing_offer()?.as_bytes().to_vec())
     }
 
     /// Consumes a scanned v2 offer; returns the new conversation id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TitlanError::PairingUnavailable`] for a stale offer, otherwise
+    /// the [`CoreError`] mapping of parse, network, storage, and libsignal
+    /// handshake failures.
     pub fn begin_pairing_from_offer(
         &self,
         payload: Vec<u8>,
@@ -198,10 +226,19 @@ impl FfiClient {
     /// Reads the relay URL out of a scanned offer WITHOUT establishing a
     /// session, so the UI can surface a non-default relay for confirmation
     /// before pairing (frozen §3). Parsing stays in core (A3).
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError::Malformed`] mapping when `payload` is not a
+    /// valid v2 offer.
     pub fn peek_offer_relay(&self, payload: Vec<u8>) -> std::result::Result<String, TitlanError> {
         Ok(self.inner.peek_offer_relay(&payload)?)
     }
 
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError`] mapping of storage query failures.
     pub fn list_conversations(&self) -> std::result::Result<Vec<Vec<u8>>, TitlanError> {
         Ok(self
             .inner
@@ -211,6 +248,11 @@ impl FfiClient {
             .collect())
     }
 
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TitlanError::Other`] when `conversation_id` is not 16 bytes,
+    /// otherwise the storage-failure mapping.
     pub fn set_conversation_relay(
         &self,
         conversation_id: Vec<u8>,
@@ -221,6 +263,12 @@ impl FfiClient {
             .set_conversation_relay(&conv_id(&conversation_id)?, &url)?)
     }
 
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TitlanError::Other`] when `conversation_id` is not 16 bytes,
+    /// otherwise the [`CoreError`] mapping of persistence failures (the deposit
+    /// is retried by sync, never an error here).
     pub fn send_chat(
         &self,
         conversation_id: Vec<u8>,
@@ -229,6 +277,11 @@ impl FfiClient {
         Ok(self.inner.send_chat(&conv_id(&conversation_id)?, &text)?)
     }
 
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TitlanError::Other`] when `conversation_id` is not 16 bytes,
+    /// otherwise the storage-failure mapping.
     pub fn messages(
         &self,
         conversation_id: Vec<u8>,
@@ -241,6 +294,11 @@ impl FfiClient {
             .collect())
     }
 
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError`] mapping when listing the conversations to
+    /// spawn fails.
     pub fn start_sync(
         &self,
         observer: Box<dyn FfiConnectionObserver>,
@@ -252,6 +310,11 @@ impl FfiClient {
         )?)
     }
 
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError`] mapping from the client `stop_sync`, which is
+    /// infallible in the current implementation.
     pub fn stop_sync(&self) -> std::result::Result<(), TitlanError> {
         Ok(self.inner.stop_sync()?)
     }

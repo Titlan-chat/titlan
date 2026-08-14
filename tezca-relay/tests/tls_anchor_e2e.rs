@@ -52,7 +52,13 @@ fn gen_cert(dir: &TempDir) -> (std::path::PathBuf, std::path::PathBuf, String) {
     let ck = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])
         .expect("generate test cert");
     let digest = ring::digest::digest(&ring::digest::SHA256, ck.cert.der().as_ref());
-    let pin: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    let pin: String = {
+        use std::fmt::Write;
+        digest.as_ref().iter().fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+    };
     let cert = dir.path().join("cert.pem");
     let key = dir.path().join("key.pem");
     std::fs::write(&cert, ck.cert.pem()).expect("write cert");
@@ -71,12 +77,12 @@ fn wait_until(cond: impl Fn() -> bool) {
     }
 }
 
-/// One test function on purpose: TEZCA_TEST_RELAY_PIN is process-global, so
+/// One test function on purpose: `TEZCA_TEST_RELAY_PIN` is process-global, so
 /// the positive flow and the wrong-cert negative control run sequentially
 /// against the SAME pinned value.
 ///
 /// Env plumbing: `std::env::set_var` is unsafe in edition 2024 (and the
-/// workspace denies unsafe_code), so the anchor env var is instead set the
+/// workspace denies `unsafe_code`), so the anchor env var is instead set the
 /// safe way — at process spawn. The parent branch generates the cert, then
 /// re-execs this same test binary filtered to this test with the env in
 /// place; the child branch (env present) runs the real flow. This also

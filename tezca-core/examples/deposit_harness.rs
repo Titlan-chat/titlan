@@ -15,10 +15,10 @@
 //!
 //! TLS to the self-signed VM relay: build with `--features test-relay-anchor`
 //! and set `TEZCA_TEST_RELAY_PIN` (hex SHA-256 of the relay leaf cert DER,
-//! from gen_test_cert's pin.hex) — the identical anchor the instrumented
+//! from `gen_test_cert`'s pin.hex) — the identical anchor the instrumented
 //! Android harness uses.
 //!
-//! State lives in `--dir` (created on demand): `titlan.db` (SQLCipher store)
+//! State lives in `--dir` (created on demand): `titlan.db` (`SQLCipher` store)
 //! plus `db.key` (hex). Writing the key beside the store is acceptable ONLY
 //! here: this is a throwaway dev identity on the build host carrying nothing
 //! but checklist traffic — INV-1 governs the product store, not this dev
@@ -26,10 +26,10 @@
 //!
 //! Subcommands:
 //!   offer   --dir D --relay URL [--wait-secs N]
-//!           mint a pairing offer, print its titlan://pair# link, then wait
+//!           mint a pairing offer, print its <titlan://pair># link, then wait
 //!           for the device to scan/paste it and complete pairing
 //!   respond --dir D --relay URL --offer LINK
-//!           consume a device-minted offer (titlan://pair# link or bare
+//!           consume a device-minted offer (<titlan://pair># link or bare
 //!           base64url payload) and complete pairing as the responder
 //!   send    --dir D --relay URL [--conv HEX] [--text S]
 //!           deposit ONE chat/1 message to the paired device's inbox,
@@ -99,12 +99,11 @@ fn parse_flags(args: &[String]) -> HashMap<String, String> {
 }
 
 fn required<'a>(flags: &'a HashMap<String, String>, key: &str) -> &'a str {
-    match flags.get(key) {
-        Some(v) => v,
-        None => {
-            eprintln!("missing required flag {key}");
-            usage_exit();
-        }
+    if let Some(v) = flags.get(key) {
+        v
+    } else {
+        eprintln!("missing required flag {key}");
+        usage_exit();
     }
 }
 
@@ -134,7 +133,7 @@ fn load_or_create_key(dir: &Path) -> [u8; 32] {
 
 /// Opens (creating on first use) the harness's own client — a full, real
 /// tezca-core identity/store; `relay` is its default relay (INV-5 semantics,
-/// same as the app's BuildConfig.RELAY_URL).
+/// same as the app's `BuildConfig.RELAY_URL`).
 fn open_client(dir: &Path, relay: &str) -> TitlanClient {
     std::fs::create_dir_all(dir).expect("create state dir");
     let key = DbKey::from_bytes(load_or_create_key(dir));
@@ -151,10 +150,9 @@ fn open_client(dir: &Path, relay: &str) -> TitlanClient {
 fn offer(flags: &HashMap<String, String>) {
     let dir = PathBuf::from(required(flags, "--dir"));
     let relay = required(flags, "--relay");
-    let wait_secs: u64 = flags
-        .get("--wait-secs")
-        .map(|s| s.parse().expect("--wait-secs must be a number"))
-        .unwrap_or(DEFAULT_WAIT_SECS);
+    let wait_secs: u64 = flags.get("--wait-secs").map_or(DEFAULT_WAIT_SECS, |s| {
+        s.parse().expect("--wait-secs must be a number")
+    });
 
     let client = open_client(&dir, relay);
     let before: HashSet<[u8; 16]> = client
@@ -203,30 +201,26 @@ fn respond(flags: &HashMap<String, String>) {
 fn send(flags: &HashMap<String, String>) {
     let dir = PathBuf::from(required(flags, "--dir"));
     let relay = required(flags, "--relay");
-    let text = flags
-        .get("--text")
-        .map(String::as_str)
-        .unwrap_or(DEFAULT_TEXT);
+    let text = flags.get("--text").map_or(DEFAULT_TEXT, String::as_str);
 
     let client = open_client(&dir, relay);
     let convs = client.list_conversations().expect("list conversations");
-    let conv: [u8; 16] = match flags.get("--conv") {
-        Some(h) => hex::decode(h.trim())
+    let conv: [u8; 16] = if let Some(h) = flags.get("--conv") {
+        hex::decode(h.trim())
             .expect("--conv is not hex")
             .try_into()
-            .expect("--conv must be 16 bytes of hex"),
-        None => {
-            if convs.len() != 1 {
-                eprintln!(
-                    "{} conversations in {} — pass --conv <hex-id> (pair first with \
-                     `offer`/`respond` if there are none)",
-                    convs.len(),
-                    dir.display()
-                );
-                std::process::exit(2);
-            }
-            convs[0]
+            .expect("--conv must be 16 bytes of hex")
+    } else {
+        if convs.len() != 1 {
+            eprintln!(
+                "{} conversations in {} — pass --conv <hex-id> (pair first with \
+                 `offer`/`respond` if there are none)",
+                convs.len(),
+                dir.display()
+            );
+            std::process::exit(2);
         }
+        convs[0]
     };
 
     println!("deposit-start epoch_ms={}", now_ms());
@@ -263,9 +257,9 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 fn b64url_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+        let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(ALPHABET[(n >> 18) as usize & 63] as char);
         out.push(ALPHABET[(n >> 12) as usize & 63] as char);
@@ -282,9 +276,9 @@ fn b64url_encode(data: &[u8]) -> String {
 fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     fn val(c: u8) -> Option<u32> {
         match c {
-            b'A'..=b'Z' => Some((c - b'A') as u32),
-            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
-            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+            b'A'..=b'Z' => Some(u32::from(c - b'A')),
+            b'a'..=b'z' => Some(u32::from(c - b'a' + 26)),
+            b'0'..=b'9' => Some(u32::from(c - b'0' + 52)),
             b'-' => Some(62),
             b'_' => Some(63),
             _ => None,
@@ -300,13 +294,15 @@ fn b64url_decode(s: &str) -> Option<Vec<u8>> {
         for &c in chunk {
             n = (n << 6) | val(c)?;
         }
-        n <<= (6 * (4 - chunk.len())) as u32;
-        out.push((n >> 16) as u8);
+        n <<= 6 * (4 - chunk.len());
+        // Byte extraction via to_be_bytes (n is a left-aligned 24-bit group).
+        let group = n.to_be_bytes();
+        out.push(group[1]);
         if chunk.len() > 2 {
-            out.push((n >> 8) as u8);
+            out.push(group[2]);
         }
         if chunk.len() > 3 {
-            out.push(n as u8);
+            out.push(group[3]);
         }
     }
     Some(out)
