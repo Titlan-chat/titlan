@@ -147,11 +147,11 @@ pub(crate) const PAIRING_SECRET_LEN: usize = 32;
 pub(crate) const RECOVERY_CONTRIB_LEN: usize = 32;
 /// Offer payload version (v2 asymmetric offer). A v1 scanner rejects it.
 pub(crate) const OFFER_VERSION: u8 = 2;
-/// `pair-ack` type_version for the v2 pairing response (rides byte 0x05).
+/// `pair-ack` `type_version` for the v2 pairing response (rides byte 0x05).
 pub(crate) const PAIR_ACK_V2: u8 = 2;
-/// `mailbox-update` type_version for the v2 pairing inbox-handoff (rides 0x06).
+/// `mailbox-update` `type_version` for the v2 pairing inbox-handoff (rides 0x06).
 pub(crate) const MAILBOX_UPDATE_V2: u8 = 2;
-/// `mailbox-update` type_version for the v3 recovery-rotation handoff (rides
+/// `mailbox-update` `type_version` for the v3 recovery-rotation handoff (rides
 /// 0x06; NO contribution field — the recovery root already exists both ends).
 pub(crate) const MAILBOX_UPDATE_V3: u8 = 3;
 

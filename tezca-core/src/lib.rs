@@ -15,7 +15,7 @@
 //! - [`config`]: padding profiles; the single default relay constant (INV-5)
 //! - [`licensing`]: deferred licensing trait + `AlwaysLicensed` stub (§5)
 //!
-//! Kotlin consumes this crate through UniFFI bindings (A3, Phase 4); Kotlin
+//! Kotlin consumes this crate through `UniFFI` bindings (A3, Phase 4); Kotlin
 //! stays UI-only.
 
 pub mod client;

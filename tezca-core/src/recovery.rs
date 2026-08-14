@@ -5,7 +5,7 @@
 //! 2026-07-19, maintainer-ratified B1/B2).
 //!
 //! Both mailboxes of a conversation share a relay, so a relay restart is TOTAL
-//! routing loss while the Double Ratchet state survives in SQLCipher on both
+//! routing loss while the Double Ratchet state survives in `SQLCipher` on both
 //! ends. Recovery re-establishes routing WITHOUT re-pairing by deriving a
 //! per-conversation sequence of unguessable mailbox IDs and converging both
 //! parties onto the same generation.

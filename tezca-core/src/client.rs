@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
 
 //! `TitlanClient` — the high-level Phase 4a surface consumed by the Android
-//! app through UniFFI (bindings generated in Phase 4b). It composes identity,
+//! app through `UniFFI` (bindings generated in Phase 4b). It composes identity,
 //! session, storage, and the relay client behind one object; Kotlin stays
 //! UI-only (A3).
 //!
@@ -51,7 +51,7 @@ pub enum ConnectionState {
     Connecting,
     /// Subscribed and receiving.
     Online,
-    /// No network (e.g. GrapheneOS per-app network revoked); backing off.
+    /// No network (e.g. `GrapheneOS` per-app network revoked); backing off.
     Offline,
     /// Waiting `secs` before the next reconnect attempt.
     Backoff {
@@ -123,6 +123,11 @@ impl TitlanClient {
     /// Opens (creating if absent) the encrypted database at `path` with `key`,
     /// using `my_relay_url` as the default relay for this device's inboxes and
     /// new conversations (INV-5: every conversation may override it).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::BadDbKey`] for a wrong database key and
+    /// [`CoreError::Storage`] for any other open or migration failure.
     pub fn open(path: &Path, key: &DbKey, my_relay_url: &str) -> Result<TitlanClient> {
         let store = Arc::new(Store::open(path, key)?);
         let engine = Engine::new(
@@ -135,16 +140,32 @@ impl TitlanClient {
 
     /// Generates the local identity + initial prekeys (A1). Errors if already
     /// initialized.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] if an identity already exists or
+    /// persistence fails, and [`CoreError::Signal`] for libsignal key-
+    /// generation failures.
     pub fn initialize_identity(&self) -> Result<()> {
         crate::identity::initialize(&self.store)
     }
 
     /// `true` once [`Self::initialize_identity`] has completed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
     pub fn is_initialized(&self) -> Result<bool> {
         crate::identity::is_initialized(&self.store)
     }
 
     /// The database schema version (used by the migration test).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
     pub fn schema_version(&self) -> Result<u32> {
         self.store.schema_version()
     }
@@ -153,6 +174,12 @@ impl TitlanClient {
     /// single-use pairing inbox + a 256-bit pairing secret. Spawns the v2
     /// listener that verifies proof-of-scan on the responder's `pair-ack/2` and
     /// hands off this side's long-lived inbox + recovery contribution.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`]/[`CoreError::Signal`] errors exporting
+    /// the offer bundle, and [`CoreError::Network`] when setting up the pairing
+    /// inbox on the relay fails.
     pub fn export_pairing_offer(&self) -> Result<PairingPayload> {
         let bundle = crate::identity::export_offer_bundle(&self.store)?;
         let payload = shared_runtime().block_on(self.engine.export_offer(&bundle))?;
@@ -162,6 +189,13 @@ impl TitlanClient {
     /// Processes a scanned v2 offer: PQXDH, sends `pair-ack/2` with proof-of-scan,
     /// awaits the `inbox-handoff`, and establishes the shared recovery root.
     /// Returns the conversation id. `PairingUnavailable` if the offer is stale.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`] for an unparseable offer,
+    /// [`CoreError::PairingUnavailable`] when the pairing inbox is gone (stale
+    /// offer), [`CoreError::Network`] for relay failures including the handoff
+    /// deadline, plus storage and libsignal handshake errors.
     pub fn begin_pairing_from_offer(&self, payload: &[u8]) -> Result<ConversationId> {
         let conv = shared_runtime().block_on(self.engine.begin_pairing_from_offer(payload))?;
         self.engine.spawn_conversation(conv);
@@ -171,23 +205,42 @@ impl TitlanClient {
     /// Reads the relay URL from a scanned v2 offer without establishing a
     /// session (frozen §3: surface a non-default relay before pairing). Framing
     /// stays in core (A3).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`] when `payload` is not a valid v2 offer.
     pub fn peek_offer_relay(&self, payload: &[u8]) -> Result<String> {
         let (_, relay, _, _) = crate::pairing::parse_pairing_offer(payload)?;
         Ok(relay)
     }
 
     /// Lists conversation ids (most-recent first).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>> {
         self.store.list_conversation_ids()
     }
 
     /// Overrides the relay URL for a conversation (INV-5).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
     pub fn set_conversation_relay(&self, id: &ConversationId, url: &str) -> Result<()> {
         self.store.set_conversation_relay(id, url)
     }
 
     /// Sets (or clears with `None`) the per-conversation TLS SPKI pin
     /// (schema v2 `relay_pin`; cert-pinning is optional-but-designed).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
     pub fn set_conversation_pin(
         &self,
         id: &ConversationId,
@@ -197,23 +250,45 @@ impl TitlanClient {
     }
 
     /// Reads the per-conversation TLS SPKI pin, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query fails
+    /// — including when no row exists for the given id (`QueryReturnedNoRows`).
     pub fn conversation_pin(&self, id: &ConversationId) -> Result<Option<[u8; 32]>> {
         self.store.conversation_pin(id)
     }
 
     /// Messages of a conversation in insertion order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
     pub fn messages(&self, id: &ConversationId) -> Result<Vec<StoredMessage>> {
         self.store.list_messages(id)
     }
 
     /// Queues and sends a `chat/1` message (persists `pending`, deposits,
     /// marks sent; retried by the sync loop on failure).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when persisting the outgoing message
+    /// fails. The deposit itself is best-effort here (its result is discarded)
+    /// and retried by the sync loop — a relay failure is not an error from this
+    /// call.
     pub fn send_chat(&self, id: &ConversationId, text: &str) -> Result<()> {
         shared_runtime().block_on(self.engine.send_chat(id, text))
     }
 
     /// Starts per-conversation receive-sync (WebSocket + reconnect/backoff +
     /// §10.7 recovery). Delivery and state changes arrive on the callbacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when listing the conversations to spawn
+    /// fails.
     pub fn start_sync(
         &self,
         observer: Arc<dyn ConnectionObserver>,
@@ -251,6 +326,13 @@ impl TitlanClient {
     /// are released before the first await), and every listener wait is
     /// raced against the cancel signal — the only unraced span is one
     /// in-flight message's persist→ack.
+    ///
+    /// # Errors
+    ///
+    /// Infallible in the current implementation: listener `JoinError`s are
+    /// deliberately swallowed (a panicked listener still satisfies the joined-
+    /// stop contract), so this returns `Ok(())`; the `Result` preserves the
+    /// call shape.
     pub fn stop_sync(&self) -> Result<()> {
         shared_runtime().block_on(self.engine.stop_sync())
     }

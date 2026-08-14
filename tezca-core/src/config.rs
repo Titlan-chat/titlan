@@ -21,18 +21,33 @@ pub struct PaddingProfile {
 
 impl PaddingProfile {
     /// The default three-bucket profile (512 / 2048 / 8192).
+    ///
+    /// # Panics
+    ///
+    /// Never panics in practice: the fixed default buckets always validate; the
+    /// `expect` pins that invariant.
     #[must_use]
     pub fn default_profile() -> Self {
         Self::new(vec![512, 2048, 8192]).expect("default buckets are valid")
     }
 
     /// A single-bucket profile (all frames padded to `size`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`] when `size` is below the 6-byte inner-
+    /// frame header.
     pub fn single(size: u32) -> crate::Result<Self> {
         Self::new(vec![size])
     }
 
     /// Builds a profile from bucket sizes. Sizes are sorted and deduplicated;
     /// every bucket must be at least the inner-frame header size (6 bytes).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`] when `buckets` is empty or its smallest
+    /// entry is below the 6-byte inner-frame header.
     pub fn new(mut buckets: Vec<u32>) -> crate::Result<Self> {
         buckets.sort_unstable();
         buckets.dedup();

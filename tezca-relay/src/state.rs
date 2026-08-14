@@ -60,6 +60,11 @@ impl AppState {
     /// Creates a mailbox with a relay-generated unguessable id (256-bit OS
     /// CSPRNG; server-side generation so clients cannot choose
     /// fingerprintable ids).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox-table mutex is poisoned or the OS CSPRNG cannot
+    /// provide entropy.
     pub fn create_mailbox(&self) -> Option<String> {
         let mut boxes = self.boxes.lock().expect("boxes lock");
         if boxes.len() >= self.cfg.max_mailboxes {
@@ -92,6 +97,10 @@ impl AppState {
     /// exists (uniform capacity error at cap — no oracle; the recovery-blocked-
     /// at-cap case is accepted and ledgered). `id` is a caller-chosen 256-bit
     /// value; the relay never learns who chose it (INV-2).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox-table mutex is poisoned.
     pub fn put_mailbox(&self, id: &str) -> bool {
         let mut boxes = self.boxes.lock().expect("boxes lock");
         // At cap, refuse uniformly — do NOT branch on existence (that branch
@@ -108,6 +117,10 @@ impl AppState {
     }
 
     /// Periodic sweep: message TTL, idle-mailbox TTL, limiter hygiene.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox-table mutex is poisoned.
     pub fn sweep(&self) {
         let now = Instant::now();
         let ttl = self.cfg.ttl;

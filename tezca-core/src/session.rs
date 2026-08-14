@@ -43,6 +43,12 @@ fn local_protocol_address(store: &Store) -> Result<ProtocolAddress> {
 /// Processes a peer's exported pre-key bundle (from QR pairing, A7) and
 /// establishes an outgoing PQXDH session. Returns the peer address parsed
 /// from the bundle, after recording it as a TOFU identity.
+///
+/// # Errors
+///
+/// Returns [`CoreError::Malformed`] for an invalid bundle,
+/// [`CoreError::Signal`] for PQXDH failures, and [`CoreError::Storage`]
+/// persisting the session and TOFU identity.
 pub fn establish_session(store: &Store, bundle: &[u8]) -> Result<String> {
     let data = pairing::parse(bundle)?;
 
@@ -90,6 +96,13 @@ pub fn establish_session(store: &Store, bundle: &[u8]) -> Result<String> {
 
 /// Encrypts `frame` for `peer`: pads to bucket (pre-crypto oversize check),
 /// ratchet-encrypts, wraps in the outer envelope. Returns full wire bytes.
+///
+/// # Errors
+///
+/// Returns [`CoreError::PayloadTooLarge`] (pre-crypto) when the frame exceeds
+/// the profile's largest bucket, [`CoreError::Signal`] for ratchet failures
+/// (e.g. no session with `peer`), and [`CoreError::Storage`] on store access
+/// failures.
 pub fn encrypt_message(
     store: &Store,
     peer: &str,
@@ -134,6 +147,16 @@ pub fn encrypt_message(
 /// Parses the outer envelope, ratchet-decrypts, validates bucket/padding,
 /// and returns the typed inner frame. Duplicate delivery yields
 /// [`CoreError::Replay`].
+///
+/// # Errors
+///
+/// Returns envelope parse rejections ([`CoreError::Malformed`],
+/// [`CoreError::UnsupportedVersion`], [`CoreError::UnknownEnvelopeKind`],
+/// [`CoreError::ReservedMustBeZero`]),
+/// [`CoreError::InvalidBucket`]/[`CoreError::InvalidPadding`] for bucket or
+/// padding violations, [`CoreError::Replay`] on duplicate delivery,
+/// [`CoreError::Signal`] for ratchet failures, and [`CoreError::Storage`] on
+/// store access failures.
 pub fn decrypt_message(
     store: &Store,
     peer: &str,
@@ -171,6 +194,12 @@ pub fn decrypt_message(
 }
 
 /// Peeks the envelope kind without decrypting.
+///
+/// # Errors
+///
+/// Returns the envelope parse rejections: [`CoreError::Malformed`],
+/// [`CoreError::UnsupportedVersion`], [`CoreError::UnknownEnvelopeKind`], or
+/// [`CoreError::ReservedMustBeZero`].
 pub fn envelope_kind(wire: &[u8]) -> Result<EnvelopeKind> {
     Ok(Envelope::parse(wire)?.kind)
 }
@@ -180,6 +209,13 @@ pub fn envelope_kind(wire: &[u8]) -> Result<EnvelopeKind> {
 /// hint). The sender's address is derived from the identity key embedded in
 /// the `PreKeySignalMessage`; the session is established and stored under it.
 /// Returns `(sender_address, frame)`.
+///
+/// # Errors
+///
+/// Returns [`CoreError::Malformed`] when the envelope is not a session-setup or
+/// the `PreKeySignalMessage` does not decode, plus the
+/// [`CoreError::Signal`]/[`CoreError::Storage`]/bucket-validation errors of the
+/// setup decrypt path.
 pub fn decrypt_setup_from_unknown(
     store: &Store,
     wire: &[u8],

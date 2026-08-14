@@ -3,7 +3,7 @@
 
 //! Rate limiting under INV-2: two STRUCTURALLY DISJOINT limiters. The
 //! per-source map is keyed by a per-boot keyed hash of the source address
-//! (std `RandomState` = SipHash with process-random keys) and holds no
+//! (std `RandomState` = `SipHash` with process-random keys) and holds no
 //! mailbox data; the per-mailbox map is keyed by mailbox id and holds no
 //! source data. The mailbox↔source join never exists as a data structure,
 //! so it cannot be logged (nothing logs anyway) or usefully dumped.
@@ -26,6 +26,10 @@ fn current_minute() -> u64 {
 }
 
 /// Seconds until the current fixed window rolls over (Retry-After value).
+///
+/// # Panics
+///
+/// Panics if the system clock reports a time before the Unix epoch.
 #[must_use]
 pub fn retry_after_secs() -> u64 {
     let secs = SystemTime::now()
@@ -135,6 +139,10 @@ impl SourceLimiter {
         self.admit(ip, 1, self.deposit_limit)
     }
 
+    ///
+    /// # Panics
+    ///
+    /// Panics if the limiter mutex is poisoned.
     pub fn prune(&self, now: Instant) {
         self.map
             .lock()
@@ -182,6 +190,10 @@ impl BoxLimiter {
         self.admit(mailbox, 1, self.ws_limit)
     }
 
+    ///
+    /// # Panics
+    ///
+    /// Panics if the limiter mutex is poisoned.
     pub fn prune(&self, now: Instant) {
         self.map
             .lock()
@@ -190,6 +202,10 @@ impl BoxLimiter {
     }
 
     /// Forget a mailbox's counters when it is deleted (hygiene).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the limiter mutex is poisoned.
     pub fn forget(&self, mailbox: &str) {
         self.map.lock().expect("limiter lock").remove(mailbox);
     }

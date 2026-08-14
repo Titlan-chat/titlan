@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
 
-//! Implementations of libsignal's five store traits backed by the SQLCipher
+//! Implementations of libsignal's five store traits backed by the `SQLCipher`
 //! database. Records are stored as the opaque serialized blobs libsignal
 //! hands us — no cryptographic material is ever constructed or interpreted
 //! here (INV-6).

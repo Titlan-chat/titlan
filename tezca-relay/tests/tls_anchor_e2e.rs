@@ -77,12 +77,12 @@ fn wait_until(cond: impl Fn() -> bool) {
     }
 }
 
-/// One test function on purpose: TEZCA_TEST_RELAY_PIN is process-global, so
+/// One test function on purpose: `TEZCA_TEST_RELAY_PIN` is process-global, so
 /// the positive flow and the wrong-cert negative control run sequentially
 /// against the SAME pinned value.
 ///
 /// Env plumbing: `std::env::set_var` is unsafe in edition 2024 (and the
-/// workspace denies unsafe_code), so the anchor env var is instead set the
+/// workspace denies `unsafe_code`), so the anchor env var is instead set the
 /// safe way — at process spawn. The parent branch generates the cert, then
 /// re-execs this same test binary filtered to this test with the env in
 /// place; the child branch (env present) runs the real flow. This also

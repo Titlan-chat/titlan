@@ -10,7 +10,7 @@
 use rustix::process::{DumpableBehavior, Resource, Rlimit, set_dumpable_behavior, setrlimit};
 
 /// Applies hardening at startup. mlockall is best-effort: it silently
-/// continues on EPERM (needs CAP_IPC_LOCK / LimitMEMLOCK=infinity) because
+/// continues on EPERM (needs `CAP_IPC_LOCK` / LimitMEMLOCK=infinity) because
 /// the zero-logging policy leaves no channel to warn on — the systemd unit
 /// grants the limit, and swap is additionally disabled at the cgroup level.
 pub fn apply() {

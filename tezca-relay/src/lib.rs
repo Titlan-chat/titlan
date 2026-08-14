@@ -11,7 +11,7 @@
 //!   bytes of a deposit (magic + version, per proto/envelope.md) and nothing
 //!   else. No log line may pair a mailbox ID with a source address — in
 //!   fact, nothing in this crate logs at all (zero-logging policy, enforced
-//!   by scripts/check-invariants.sh and the zero_knowledge test suite).
+//!   by scripts/check-invariants.sh and the `zero_knowledge` test suite).
 //! - INV-3: RAM-only mailboxes. No database, no files, no swap (mlockall +
 //!   deploy-level controls), no core dumps (rlimit + dumpable off).
 //! - INV-5: nothing here knows about "the" relay — no self-URL, no client

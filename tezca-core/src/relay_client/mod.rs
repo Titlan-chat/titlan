@@ -43,7 +43,7 @@ type HelloSeen =
 /// and awaits the responder's `/3{F_B}` THERE; on receipt it switches receives
 /// to `F_A`, points sends at `F_B`, and deletes the derived inbox.
 struct OffererAwaitingFb {
-    /// The fresh relay-generated inbox the offerer will receive on after F_B.
+    /// The fresh relay-generated inbox the offerer will receive on after `F_B`.
     f_a: String,
     /// The offerer's derived inbox, kept subscribed until the second leg lands.
     derived_recv: String,

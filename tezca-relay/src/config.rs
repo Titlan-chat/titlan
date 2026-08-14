@@ -61,6 +61,12 @@ impl Default for Config {
 impl Config {
     /// Parses command-line flags. Returns a human-readable error for the
     /// startup path (the only place the relay is allowed to be talkative).
+    ///
+    /// # Errors
+    ///
+    /// Returns a human-readable message for an unknown flag, a missing value, a
+    /// non-numeric or out-of-range number, or missing TLS material without
+    /// `--plain-http`.
     pub fn parse(args: impl Iterator<Item = String>) -> Result<Config, String> {
         let mut cfg = Config::default();
         let mut args = args.peekable();

@@ -56,6 +56,13 @@ impl Envelope {
 
     /// Parses wire bytes. Every failure is a typed, clean rejection (INV-4);
     /// this function must never panic on any input (fuzz target).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`] (too short, bad magic),
+    /// [`CoreError::UnsupportedVersion`], [`CoreError::UnknownEnvelopeKind`],
+    /// or [`CoreError::ReservedMustBeZero`] — every failure a typed, clean
+    /// rejection.
     pub fn parse(bytes: &[u8]) -> Result<Envelope> {
         // Header plus at least one ciphertext byte.
         if bytes.len() <= OUTER_HEADER_LEN {

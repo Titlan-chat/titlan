@@ -4,7 +4,7 @@
 //! Phase 4a acceptance: tezca-core's `TitlanClient` relay client driven
 //! end-to-end against the real relay server (Phase 3 harness). Lives in
 //! tezca-relay because both halves are here — the relay binary
-//! (CARGO_BIN_EXE) and tezca-core (dev-dependency).
+//! (`CARGO_BIN_EXE`) and tezca-core (dev-dependency).
 //!
 //! RED state: the pairing/sync/send/recovery/pin surface is `todo!()` in
 //! tezca-core, so these fail at runtime (not at build). The green
@@ -420,7 +420,7 @@ fn v2_message_queued_while_relay_down_delivers_after_recovery() {
 }
 
 /// (iv) ack-after-persist: a delivered message is written to the encrypted
-/// SQLCipher store BEFORE the relay is acked and before the UI callback, so a
+/// `SQLCipher` store BEFORE the relay is acked and before the UI callback, so a
 /// process death between persist and callback loses nothing — the message is
 /// already durable and rehydrates on restart. Here we assert the message is in
 /// the store (`messages()`), independent of the transient callback.

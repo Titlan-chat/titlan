@@ -15,10 +15,10 @@
 //!
 //! TLS to the self-signed VM relay: build with `--features test-relay-anchor`
 //! and set `TEZCA_TEST_RELAY_PIN` (hex SHA-256 of the relay leaf cert DER,
-//! from gen_test_cert's pin.hex) — the identical anchor the instrumented
+//! from `gen_test_cert`'s pin.hex) — the identical anchor the instrumented
 //! Android harness uses.
 //!
-//! State lives in `--dir` (created on demand): `titlan.db` (SQLCipher store)
+//! State lives in `--dir` (created on demand): `titlan.db` (`SQLCipher` store)
 //! plus `db.key` (hex). Writing the key beside the store is acceptable ONLY
 //! here: this is a throwaway dev identity on the build host carrying nothing
 //! but checklist traffic — INV-1 governs the product store, not this dev
@@ -26,10 +26,10 @@
 //!
 //! Subcommands:
 //!   offer   --dir D --relay URL [--wait-secs N]
-//!           mint a pairing offer, print its titlan://pair# link, then wait
+//!           mint a pairing offer, print its <titlan://pair># link, then wait
 //!           for the device to scan/paste it and complete pairing
 //!   respond --dir D --relay URL --offer LINK
-//!           consume a device-minted offer (titlan://pair# link or bare
+//!           consume a device-minted offer (<titlan://pair># link or bare
 //!           base64url payload) and complete pairing as the responder
 //!   send    --dir D --relay URL [--conv HEX] [--text S]
 //!           deposit ONE chat/1 message to the paired device's inbox,
@@ -133,7 +133,7 @@ fn load_or_create_key(dir: &Path) -> [u8; 32] {
 
 /// Opens (creating on first use) the harness's own client — a full, real
 /// tezca-core identity/store; `relay` is its default relay (INV-5 semantics,
-/// same as the app's BuildConfig.RELAY_URL).
+/// same as the app's `BuildConfig.RELAY_URL`).
 fn open_client(dir: &Path, relay: &str) -> TitlanClient {
     std::fs::create_dir_all(dir).expect("create state dir");
     let key = DbKey::from_bytes(load_or_create_key(dir));

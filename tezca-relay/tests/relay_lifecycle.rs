@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Oculux Technologies LLC
 
 //! §6 Phase 3 acceptance: two real tezca-core instances exchange 1,000
-//! messages through a REAL relay process; the relay is SIGKILLed and
+//! messages through a REAL relay process; the relay is `SIGKILLed` and
 //! restarted mid-test with client retry recovering cleanly; memory stays
 //! flat under sustained load.
 //!
@@ -349,7 +349,7 @@ fn settled_rss(relay: &common::RelayProc) -> u64 {
 }
 
 /// INV-3 positive lock assertion (G2.ii ratified 2026-08-10): when the
-/// environment grants RLIMIT_MEMLOCK, the relay's best-effort
+/// environment grants `RLIMIT_MEMLOCK`, the relay's best-effort
 /// `mlockall(CURRENT|FUTURE)` (hardening.rs) must actually pin pages —
 /// `VmLck` in `/proc/<pid>/status` strictly positive on the live child.
 /// When the environment denies memlock, SKIP cleanly with a printed reason

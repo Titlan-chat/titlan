@@ -7,7 +7,7 @@
 //! (`TEZCA_TEST_RELAY_PIN` = hex SHA-256 of the leaf cert DER — the same
 //! value tezca-core's ws/pin.rs `PinVerifier` checks).
 //!
-//! Usage: cargo run -p tezca-relay --example gen_test_cert -- <out-dir>
+//! Usage: cargo run -p tezca-relay --example `gen_test_cert` -- <out-dir>
 //! Writes: <out-dir>/{cert.pem,key.pem,pin.hex}
 
 fn main() {
