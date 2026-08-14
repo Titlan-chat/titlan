@@ -6,6 +6,18 @@
 
 use crate::envelope::PayloadType;
 
+/// Why a pairing offer fell outside its embedded validity window (freeze
+/// `docs/design/2026-08-pair-offer-v3-freeze.md` §4/§5). The user surface is
+/// one message for both details (V3-D2); this enum stays distinct for
+/// diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfferExpiryDetail {
+    /// `now >= issued_at + ttl_s` — the offer's lifetime has elapsed.
+    Expired,
+    /// `issued_at > now + FUTURE_SKEW_S` — dated beyond the future-skew grace.
+    NotYetValid,
+}
+
 /// Errors produced by `tezca-core`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -81,6 +93,25 @@ pub enum CoreError {
     /// condition (`proto/pairing.md`): a captured QR cannot re-pair.
     #[error("pairing inbox unavailable (consumed or expired)")]
     PairingUnavailable,
+    /// A scanned v3 offer is outside its embedded validity window (freeze §4,
+    /// the H7 distinct expired-offer error). Raised at decode, BEFORE any
+    /// network I/O. Timestamps only — no INV-1 exposure.
+    #[error("pairing offer outside validity (issued_at {issued_at}, ttl {ttl_s} s, now {now}, {detail:?})")]
+    OfferExpired {
+        /// The offer's embedded mint time (Unix seconds, offerer clock).
+        issued_at: u64,
+        /// The offer's embedded time-to-live in seconds.
+        ttl_s: u32,
+        /// The acceptor clock at evaluation (Unix seconds).
+        now: u64,
+        /// Which validity bound failed (§4 steps 3-4).
+        detail: OfferExpiryDetail,
+    },
+    /// A v3 offer's trailing `offer_sig` did not verify over the wire prefix
+    /// with the identity key inside the offer's own bundle (freeze §3) — a
+    /// crypto-class rejection, distinct from [`CoreError::ProofOfScanFailed`].
+    #[error("pairing offer signature invalid")]
+    OfferSignatureInvalid,
     /// The responder's first sealed message failed proof-of-scan: the MAC over
     /// its bundle, keyed by the offer's pairing secret, did not verify. The
     /// return is rejected — possession-of-offer is the trust root

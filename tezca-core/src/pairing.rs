@@ -231,6 +231,110 @@ pub(crate) fn parse_pairing_offer(
     Ok((bundle, relay, inbox, secret))
 }
 
+// --- 5a-1: pair-offer v3 (freeze `docs/design/2026-08-pair-offer-v3-freeze.md`
+// §2-§4, V3-D1/D2/D3). The offer gains an authenticated validity window:
+// issued_at (u64 BE seconds) + ttl_s (u32 BE), then a fixed 64 B XEd25519
+// `offer_sig` by the offer's identity key over ALL preceding wire bytes.
+// Sign-the-wire-bytes / verify-the-wire-bytes: the signed region is the exact
+// serialized prefix — no canonicalization layer exists to get wrong. ---------
+
+/// Offer payload version (v3 authenticated-validity offer). The acceptor is
+/// v3-only (V3-D4): `0x01`/`0x02` are unsupported-version rejects.
+pub(crate) const OFFER_VERSION_V3: u8 = 3;
+/// Fixed length of the trailing XEd25519 `offer_sig` (freeze §2).
+pub(crate) const OFFER_SIG_LEN: usize = 64;
+
+/// Decoded v3 offer fields (freeze §2), yielded only after the full §4
+/// validity rule has passed.
+pub(crate) struct OfferV3 {
+    pub bundle: Vec<u8>,
+    pub relay_url: String,
+    pub pairing_inbox_id: String,
+    pub pairing_secret: [u8; PAIRING_SECRET_LEN],
+    pub issued_at: u64,
+    pub ttl_s: u32,
+}
+
+/// The validity window an offer embeds at mint — the single value the UI
+/// countdown and deposit-harness fuse read (freeze §6).
+pub(crate) struct OfferValidity {
+    pub issued_at: u64,
+    pub ttl_s: u32,
+}
+
+/// Encodes a v3 pairing offer (freeze §2): version, bundle, relay, pairing
+/// inbox, pairing secret, `issued_at`, `ttl_s`, then `offer_sig` by the
+/// offer's identity private key over the entire preceding prefix.
+///
+/// RED STUB (5a-1 valid-red compile surface): emits the exact §2 layout but
+/// UNSIGNED — 64 zero bytes where `offer_sig` belongs. Green signs.
+pub(crate) fn encode_pairing_offer_v3(
+    bundle: &[u8],
+    relay_url: &str,
+    pairing_inbox_id: &str,
+    pairing_secret: &[u8; PAIRING_SECRET_LEN],
+    issued_at: u64,
+    ttl_s: u32,
+    _identity_private: &libsignal_protocol::PrivateKey,
+) -> Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(bundle.len() + relay_url.len() + 176);
+    out.push(OFFER_VERSION_V3);
+    put_bytes(&mut out, bundle);
+    put_bytes(&mut out, relay_url.as_bytes());
+    out.extend_from_slice(pairing_inbox_id.as_bytes()); // fixed 43 bytes
+    out.extend_from_slice(pairing_secret);
+    out.extend_from_slice(&issued_at.to_be_bytes());
+    out.extend_from_slice(&ttl_s.to_be_bytes());
+    out.extend_from_slice(&[0u8; OFFER_SIG_LEN]);
+    Ok(out)
+}
+
+/// Parses and validates a v3 offer at acceptor clock `now` (Unix seconds) —
+/// the freeze §4 rule, evaluated BEFORE any network I/O. `now` is an explicit
+/// parameter: production callers pass the system clock; tests inject a
+/// deterministic instant.
+///
+/// RED STUB (5a-1 valid-red compile surface): v2-legacy behavior — structural
+/// field extraction only, v2-style error class for a version mismatch, no
+/// signature verification, no validity evaluation, trailing bytes tolerated.
+pub(crate) fn parse_pairing_offer_v3(bytes: &[u8], _now: u64) -> Result<OfferV3> {
+    let mut c = Cursor { bytes, pos: 0 };
+    if c.u8()? != OFFER_VERSION_V3 {
+        return Err(CoreError::Malformed("unknown pairing offer version"));
+    }
+    let bundle = c.bytes_field()?.to_vec();
+    let relay_url = utf8(c.bytes_field()?)?;
+    let pairing_inbox_id = utf8(c.take(MAILBOX_ID_LEN)?)?;
+    let pairing_secret: [u8; PAIRING_SECRET_LEN] = c
+        .take(PAIRING_SECRET_LEN)?
+        .try_into()
+        .expect("slice of fixed length");
+    let issued_at = c.u64()?;
+    let ttl_s = c.u32()?;
+    let _sig = c.take(OFFER_SIG_LEN)?;
+    Ok(OfferV3 {
+        bundle,
+        relay_url,
+        pairing_inbox_id,
+        pairing_secret,
+        issued_at,
+        ttl_s,
+    })
+}
+
+/// Reads the embedded validity window from an offer without accepting it —
+/// the offerer-side read for the UI countdown and the deposit-harness fuse
+/// (freeze §6; no signature or clock evaluation, no network).
+///
+/// RED STUB (5a-1 valid-red compile surface): legacy behavior — returns the
+/// retired fixed fuse (`DEFAULT_WAIT_SECS` = 600) regardless of the offer.
+pub(crate) fn peek_offer_validity(_bytes: &[u8]) -> Result<OfferValidity> {
+    Ok(OfferValidity {
+        issued_at: 0,
+        ttl_s: 600,
+    })
+}
+
 /// Proof-of-scan MAC over `responder_bundle ‖ recovery_root_contribution`,
 /// keyed by the offer's `pairing_secret` (HMAC-SHA256, INV-6; F2). Binding the
 /// contribution into the MAC means an off-path party cannot substitute a
@@ -393,6 +497,12 @@ impl<'a> Cursor<'a> {
     fn u32(&mut self) -> Result<u32> {
         Ok(u32::from_be_bytes(
             self.take(4)?.try_into().expect("4 bytes"),
+        ))
+    }
+
+    fn u64(&mut self) -> Result<u64> {
+        Ok(u64::from_be_bytes(
+            self.take(8)?.try_into().expect("8 bytes"),
         ))
     }
 

@@ -113,6 +113,18 @@ impl PairingPayload {
     }
 }
 
+/// The validity window a v3 pairing offer embeds at mint (freeze
+/// `docs/design/2026-08-pair-offer-v3-freeze.md` §2/§6): `issued_at` (offerer
+/// clock, Unix seconds) and `ttl_s`. This is the SINGLE governing value for
+/// every offerer-side lifetime display — the UI countdown and the
+/// deposit-harness fuse both read it from the minted offer's bytes.
+pub struct OfferValidity {
+    /// Mint time embedded in the offer (Unix seconds, offerer clock).
+    pub issued_at: u64,
+    /// Time-to-live embedded in the offer, in seconds.
+    pub ttl_s: u32,
+}
+
 /// High-level client: one instance per on-device identity/database.
 pub struct TitlanClient {
     store: Arc<Store>,
@@ -212,6 +224,26 @@ impl TitlanClient {
     pub fn peek_offer_relay(&self, payload: &[u8]) -> Result<String> {
         let (_, relay, _, _) = crate::pairing::parse_pairing_offer(payload)?;
         Ok(relay)
+    }
+
+    /// Reads the embedded validity window (`issued_at`, `ttl_s`) from a
+    /// minted/scanned offer WITHOUT accepting it — display/tooling only, no
+    /// signature or clock evaluation, no network (freeze §6). Framing stays in
+    /// core (A3).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Malformed`]/[`CoreError::UnsupportedVersion`]
+    /// mappings when `payload` is not structurally a v3 offer.
+    ///
+    /// [`CoreError::Malformed`]: crate::CoreError::Malformed
+    /// [`CoreError::UnsupportedVersion`]: crate::CoreError::UnsupportedVersion
+    pub fn peek_offer_validity(&self, payload: &[u8]) -> Result<OfferValidity> {
+        let v = crate::pairing::peek_offer_validity(payload)?;
+        Ok(OfferValidity {
+            issued_at: v.issued_at,
+            ttl_s: v.ttl_s,
+        })
     }
 
     /// Lists conversation ids (most-recent first).
