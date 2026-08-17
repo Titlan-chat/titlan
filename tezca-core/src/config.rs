@@ -9,6 +9,14 @@
 /// Titlan domain purchase (work order §10.4).
 pub const DEFAULT_RELAY_URL: &str = "wss://relay.invalid/v1";
 
+/// Loopback relay URL pinned by test fixtures. Test scratch URLs are exempt
+/// from the INV-5 sweep by design (family 14), but the sweep's
+/// `#[cfg(test)]`-module tracking is per-file and cannot see a module gated
+/// at its `lib.rs` declaration — so file-level test modules take the literal
+/// from here, the sanctioned single source, instead of pinning their own.
+#[cfg(test)]
+pub(crate) const TEST_LOOPBACK_RELAY_URL: &str = "wss://127.0.0.1:8443";
+
 // --- Pair-offer v3 validity constants (freeze
 // `docs/design/2026-08-pair-offer-v3-freeze.md` §4/§6, V3-D2) — the SINGLE
 // source for every consumer: mint path, acceptor validity rule, UI countdown,

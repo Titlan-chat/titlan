@@ -26,7 +26,9 @@ use crate::storage::DbKey;
 /// (2026-08-12T12:40:00Z; bit 30 is set — R4 relies on that).
 const T0: u64 = 1_755_000_000;
 
-const RELAY: &str = "wss://127.0.0.1:8443";
+// Same loopback value the retired literal pinned; single-sourced in config
+// because the INV-5 sweep cannot see this file's lib.rs `#[cfg(test)]` gate.
+const RELAY: &str = crate::config::TEST_LOOPBACK_RELAY_URL;
 const INBOX: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 43 chars
 const SECRET: [u8; PAIRING_SECRET_LEN] = [0x42; PAIRING_SECRET_LEN];
 
@@ -111,8 +113,12 @@ fn r2_expired_offer_is_offer_expired_with_zero_network_io() {
     let dead_relay = format!("https://127.0.0.1:{port}");
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let client = TitlanClient::open(&dir.path().join("titlan.db"), &DbKey::generate(), &dead_relay)
-        .expect("open client");
+    let client = TitlanClient::open(
+        &dir.path().join("titlan.db"),
+        &DbKey::generate(),
+        &dead_relay,
+    )
+    .expect("open client");
     client.initialize_identity().expect("initialize identity");
 
     // Offer from a peer identity, expired one full TTL ago (real clock: the
@@ -128,13 +134,20 @@ fn r2_expired_offer_is_offer_expired_with_zero_network_io() {
             now: seen,
             detail: OfferExpiryDetail::Expired,
         }) => {
-            assert_eq!(issued_at, now - 7200, "error carries the embedded issued_at");
+            assert_eq!(
+                issued_at,
+                now - 7200,
+                "error carries the embedded issued_at"
+            );
             assert_eq!(ttl_s, 3600, "error carries the embedded ttl_s");
-            assert!(seen >= issued_at + u64::from(ttl_s), "error carries a coherent now");
+            assert!(
+                seen >= issued_at + u64::from(ttl_s),
+                "error carries a coherent now"
+            );
         }
-        Err(other) => panic!(
-            "expected OfferExpired{{Expired}} with zero network I/O, got Err({other})"
-        ),
+        Err(other) => {
+            panic!("expected OfferExpired{{Expired}} with zero network I/O, got Err({other})")
+        }
         Ok(_) => panic!("expected OfferExpired{{Expired}}, got Ok(..)"),
     }
 }
@@ -177,7 +190,11 @@ fn r4_bit_flipped_issued_at_is_signature_invalid_not_expired() {
     // Flip bit 30 (byte 4 of the big-endian u64, mask 0x40): set at T0, so
     // the flip re-dates the offer ~34 years into the past — an expiry-looking
     // tamper that must be reported as a signature failure, never as expiry.
-    assert_eq!(enc[issued_at_off + 4] & 0x40, 0x40, "bit 30 of issued_at is set at T0");
+    assert_eq!(
+        enc[issued_at_off + 4] & 0x40,
+        0x40,
+        "bit 30 of issued_at is set at T0"
+    );
     enc[issued_at_off + 4] ^= 0x40;
     match pairing::parse_pairing_offer_v3(&enc, T0 + 1) {
         Err(CoreError::OfferSignatureInvalid) => {}
@@ -220,9 +237,9 @@ fn r6_future_dated_beyond_grace_is_not_yet_valid() {
             assert_eq!(issued_at, T0 + FUTURE_SKEW_S + 1);
             assert_eq!(now, T0);
         }
-        Err(other) => panic!(
-            "expected OfferExpired{{NotYetValid}} beyond the skew grace, got Err({other})"
-        ),
+        Err(other) => {
+            panic!("expected OfferExpired{{NotYetValid}} beyond the skew grace, got Err({other})")
+        }
         Ok(_) => panic!("expected OfferExpired{{NotYetValid}} beyond the skew grace, got Ok(..)"),
     }
     let at_grace = mint(&id, RELAY, T0 + FUTURE_SKEW_S, 3600);
@@ -243,9 +260,9 @@ fn r7_v2_fixture_bytes_are_unsupported_version() {
     let payload = b64url_decode(fragment);
     match pairing::parse_pairing_offer_v3(&payload, T0) {
         Err(CoreError::UnsupportedVersion { got: 2 }) => {}
-        Err(other) => panic!(
-            "expected UnsupportedVersion{{got: 2}} for the v2 corpus, got Err({other})"
-        ),
+        Err(other) => {
+            panic!("expected UnsupportedVersion{{got: 2}} for the v2 corpus, got Err({other})")
+        }
         Ok(_) => panic!("expected UnsupportedVersion{{got: 2}} for the v2 corpus, got Ok(..)"),
     }
 }
@@ -298,7 +315,10 @@ fn r10_qr_link_byte_identity_round_trip_v3() {
     let enc = mint(&id, RELAY, T0, OFFER_DEFAULT_TTL_S);
     let link = format!("titlan://pair#{}", b64url_encode(&enc));
     let decoded = b64url_decode(link.strip_prefix("titlan://pair#").expect("link prefix"));
-    assert_eq!(decoded, enc, "QR/link carrier must be byte-identical for v3 bytes");
+    assert_eq!(
+        decoded, enc,
+        "QR/link carrier must be byte-identical for v3 bytes"
+    );
     let offer = pairing::parse_pairing_offer_v3(&decoded, T0 + 1).expect("carried offer accepts");
     assert_eq!(offer.issued_at, T0, "carried issued_at intact");
     assert_eq!(offer.ttl_s, OFFER_DEFAULT_TTL_S, "carried ttl_s intact");

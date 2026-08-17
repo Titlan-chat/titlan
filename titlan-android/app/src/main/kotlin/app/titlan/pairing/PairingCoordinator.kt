@@ -14,19 +14,21 @@ import app.titlan.core.AppCore
  */
 object PairingCoordinator {
 
-    /** Offer time-to-live (frozen design §3: 1 h, single-use). */
-    private const val OFFER_TTL_MS = 60L * 60L * 1000L
-
     /**
-     * Offerer side: mints a single-use offer (bundle + relay + pairing mailbox
-     * + 256-bit pairing secret), creates the pairing mailbox, and returns the
-     * offer for display. TTL 1 h; single-use (frozen design §3).
+     * Offerer side: mints a single-use v3 offer (bundle + relay + pairing
+     * mailbox + 256-bit pairing secret + an authenticated embedded validity
+     * window), creates the pairing mailbox, and returns the offer for display.
      */
     fun createOffer(): PairingOffer {
         val bytes = AppCore.get().exportPairingOffer()
-        // The core mints + owns the TTL/expiry semantics; the UI countdown is a
-        // display convenience computed from mint time.
-        return PairingOffer(bytes, nowMillis() + OFFER_TTL_MS)
+        // Pair-offer v3 (freeze §6): the countdown READS the validity window
+        // embedded in the minted offer — issued_at + ttl_s, both minted and
+        // owned by core. The former display-only OFFER_TTL_MS duplicate is
+        // deleted; the offer itself is the single governing value.
+        val validity = AppCore.get().peekOfferValidity(bytes)
+        val expiresAtEpochMillis =
+            (validity.issuedAtEpochSeconds + validity.ttlSeconds) * 1000L
+        return PairingOffer(bytes, expiresAtEpochMillis)
     }
 
     /**
@@ -44,10 +46,9 @@ object PairingCoordinator {
     // the relay) needs a core FFI cancel method — new FFI surface, flagged
     // rather than added (F3, 2026-07-21; ledgered in
     // docs/acceptance-venues.md). Until it lands, a dismissed offer remains
-    // single-use and lapses at its 1 h TTL, and the UI says so honestly
-    // instead of claiming a cancellation that does not happen.
-
-    private fun nowMillis(): Long = System.currentTimeMillis()
+    // single-use and lapses at its embedded TTL, at which point the core
+    // listener deletes the pairing mailbox (v3 freeze §6), and the UI says so
+    // honestly instead of claiming an immediate cancellation.
 }
 
 /**

@@ -11,13 +11,15 @@ import org.junit.Test
 
 /**
  * QR-codec conformance vector (the QrCodec dual-sourcing ledger item, landed
- * as a permanent guard; maintainer-ratified receipt 4b2-WO-codec-fixture-tests).
+ * as a permanent guard; maintainer-ratified receipt 4b2-WO-codec-fixture-tests;
+ * vector moved to the v3 offer at unit 5a-1 — the pair-offer v3 freeze).
  * The committed pairing-offer link in `proto/fixtures/` must decode to exactly
  * the pinned offer bytes on BOTH stacks — here (plain-JVM Kotlin) and in the
  * Rust core suite (`tezca-core/src/pairing.rs`,
  * `committed_conformance_vector_link_round_trips_and_parses`) — so the link
  * wire encoding cannot drift on either side without a red build. Expectations
- * are single-sourced in `pairing-offer-v2.expected.txt`, shared by both tests.
+ * are single-sourced in `pairing-offer-v3.expected.txt`, shared by both tests.
+ * (The v2 vector stays committed as the Rust acceptance R7 rejection input.)
  *
  * `android.util.Base64` is not executable off-device (plain-JVM unit suite, no
  * Robolectric), so this test applies the established byte-exact replication of
@@ -40,8 +42,8 @@ class QrCodecConformanceTest {
 
     @Test
     fun committedVectorDecodesToPinnedBytes() {
-        val link = fixture("pairing-offer-v2.link.txt").readText(Charsets.UTF_8)
-        val expected = fixture("pairing-offer-v2.expected.txt").readLines()
+        val link = fixture("pairing-offer-v3.link.txt").readText(Charsets.UTF_8)
+        val expected = fixture("pairing-offer-v3.expected.txt").readLines()
             .mapNotNull { line -> line.split('=', limit = 2).takeIf { it.size == 2 } }
             .associate { (key, value) -> key to value }
 

@@ -182,29 +182,40 @@ impl TitlanClient {
         self.store.schema_version()
     }
 
-    /// Exports a v2 pairing OFFER (`proto/pairing.md` §Offer): bundle + relay +
-    /// single-use pairing inbox + a 256-bit pairing secret. Spawns the v2
-    /// listener that verifies proof-of-scan on the responder's `pair-ack/2` and
-    /// hands off this side's long-lived inbox + recovery contribution.
+    /// Exports a v3 pairing OFFER (freeze
+    /// `docs/design/2026-08-pair-offer-v3-freeze.md` §2): bundle + relay +
+    /// single-use pairing inbox + a 256-bit pairing secret + an authenticated
+    /// validity window (`issued_at`, `ttl_s`, identity-signed `offer_sig`).
+    /// Spawns the listener that verifies proof-of-scan on the responder's
+    /// `pair-ack/2` and hands off this side's long-lived inbox + recovery
+    /// contribution; the listener is fused to the embedded TTL and deletes
+    /// the pairing mailbox at expiry (freeze §6, best-effort).
     ///
     /// # Errors
     ///
     /// Returns [`CoreError::Storage`]/[`CoreError::Signal`] errors exporting
-    /// the offer bundle, and [`CoreError::Network`] when setting up the pairing
-    /// inbox on the relay fails.
+    /// the offer bundle or signing, and [`CoreError::Network`] when setting up
+    /// the pairing inbox on the relay fails.
     pub fn export_pairing_offer(&self) -> Result<PairingPayload> {
         let bundle = crate::identity::export_offer_bundle(&self.store)?;
         let payload = shared_runtime().block_on(self.engine.export_offer(&bundle))?;
         Ok(PairingPayload::from_bytes(payload))
     }
 
-    /// Processes a scanned v2 offer: PQXDH, sends `pair-ack/2` with proof-of-scan,
-    /// awaits the `inbox-handoff`, and establishes the shared recovery root.
-    /// Returns the conversation id. `PairingUnavailable` if the offer is stale.
+    /// Processes a scanned v3 offer: decode-time validity FIRST (freeze §4 —
+    /// signature and TTL window evaluated at the acceptor clock BEFORE any
+    /// network I/O), then PQXDH, `pair-ack/2` with proof-of-scan, the
+    /// `inbox-handoff`, and the shared recovery root. Returns the
+    /// conversation id. The acceptor is v3-only (V3-D4): v1/v2 payloads are
+    /// unsupported-version rejects.
     ///
     /// # Errors
     ///
-    /// Returns [`CoreError::Malformed`] for an unparseable offer,
+    /// Returns [`CoreError::Malformed`]/[`CoreError::UnsupportedVersion`] for
+    /// an unparseable or non-v3 offer, [`CoreError::OfferSignatureInvalid`]
+    /// when `offer_sig` does not verify,
+    /// [`CoreError::OfferExpired`] when the offer is outside its embedded
+    /// validity window (all three BEFORE any network I/O),
     /// [`CoreError::PairingUnavailable`] when the pairing inbox is gone (stale
     /// offer), [`CoreError::Network`] for relay failures including the handoff
     /// deadline, plus storage and libsignal handshake errors.
@@ -214,16 +225,16 @@ impl TitlanClient {
         Ok(conv)
     }
 
-    /// Reads the relay URL from a scanned v2 offer without establishing a
-    /// session (frozen §3: surface a non-default relay before pairing). Framing
-    /// stays in core (A3).
+    /// Reads the relay URL from a scanned v3 offer without establishing a
+    /// session (frozen §3: surface a non-default relay before pairing) —
+    /// structural read only, no accept decision. Framing stays in core (A3).
     ///
     /// # Errors
     ///
-    /// Returns [`CoreError::Malformed`] when `payload` is not a valid v2 offer.
+    /// Returns [`CoreError::Malformed`]/[`CoreError::UnsupportedVersion`]
+    /// mappings when `payload` is not structurally a v3 offer.
     pub fn peek_offer_relay(&self, payload: &[u8]) -> Result<String> {
-        let (_, relay, _, _) = crate::pairing::parse_pairing_offer(payload)?;
-        Ok(relay)
+        Ok(crate::pairing::parse_offer_v3_structure(payload)?.relay_url)
     }
 
     /// Reads the embedded validity window (`issued_at`, `ttl_s`) from a
@@ -235,9 +246,6 @@ impl TitlanClient {
     ///
     /// Returns [`CoreError::Malformed`]/[`CoreError::UnsupportedVersion`]
     /// mappings when `payload` is not structurally a v3 offer.
-    ///
-    /// [`CoreError::Malformed`]: crate::CoreError::Malformed
-    /// [`CoreError::UnsupportedVersion`]: crate::CoreError::UnsupportedVersion
     pub fn peek_offer_validity(&self, payload: &[u8]) -> Result<OfferValidity> {
         let v = crate::pairing::peek_offer_validity(payload)?;
         Ok(OfferValidity {

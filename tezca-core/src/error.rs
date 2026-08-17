@@ -22,8 +22,10 @@ pub enum OfferExpiryDetail {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CoreError {
-    /// Outer envelope carries a protocol version this client does not speak.
-    #[error("unsupported envelope version {got}")]
+    /// A versioned payload (outer envelope, or a pairing offer — the v3-only
+    /// acceptor rejects v1/v2 here) carries a version this client does not
+    /// speak.
+    #[error("unsupported version {got}")]
     UnsupportedVersion {
         /// The version byte received.
         got: u8,
@@ -96,7 +98,9 @@ pub enum CoreError {
     /// A scanned v3 offer is outside its embedded validity window (freeze §4,
     /// the H7 distinct expired-offer error). Raised at decode, BEFORE any
     /// network I/O. Timestamps only — no INV-1 exposure.
-    #[error("pairing offer outside validity (issued_at {issued_at}, ttl {ttl_s} s, now {now}, {detail:?})")]
+    #[error(
+        "pairing offer outside validity (issued_at {issued_at}, ttl {ttl_s} s, now {now}, {detail:?})"
+    )]
     OfferExpired {
         /// The offer's embedded mint time (Unix seconds, offerer clock).
         issued_at: u64,

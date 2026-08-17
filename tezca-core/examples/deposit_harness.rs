@@ -25,9 +25,10 @@
 //! fixture. Never mirror this pattern in product code.
 //!
 //! Subcommands:
-//!   offer   --dir D --relay URL [--wait-secs N]
+//!   offer   --dir D --relay URL
 //!           mint a pairing offer, print its <titlan://pair># link, then wait
-//!           for the device to scan/paste it and complete pairing
+//!           for the device to scan/paste it and complete pairing; the wait
+//!           fuse IS the offer's embedded `ttl_s` (pair-offer v3 freeze §6)
 //!   respond --dir D --relay URL --offer LINK
 //!           consume a device-minted offer (<titlan://pair># link or bare
 //!           base64url payload) and complete pairing as the responder
@@ -50,7 +51,6 @@ const LINK_PREFIX: &str = "titlan://pair#";
 const DB_FILE: &str = "titlan.db";
 const KEY_FILE: &str = "db.key";
 const DEFAULT_TEXT: &str = "doze-latency checklist deposit";
-const DEFAULT_WAIT_SECS: u64 = 600;
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -72,7 +72,7 @@ fn usage_exit() -> ! {
     eprintln!(
         "usage: deposit_harness <offer|respond|send|selftest> \
          --dir <state-dir> --relay <url> [--offer <link>] [--conv <hex>] \
-         [--text <s>] [--wait-secs <n>]"
+         [--text <s>]"
     );
     std::process::exit(2);
 }
@@ -82,7 +82,7 @@ fn parse_flags(args: &[String]) -> HashMap<String, String> {
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         match flag.as_str() {
-            "--dir" | "--relay" | "--offer" | "--conv" | "--text" | "--wait-secs" => {
+            "--dir" | "--relay" | "--offer" | "--conv" | "--text" => {
                 let Some(value) = it.next() else {
                     eprintln!("missing value for {flag}");
                     usage_exit();
@@ -144,15 +144,12 @@ fn open_client(dir: &Path, relay: &str) -> TitlanClient {
     client
 }
 
-/// Harness as OFFERER: the device scans/pastes the printed link, the real v2
+/// Harness as OFFERER: the device scans/pastes the printed link, the real
 /// pairing (proof-of-scan, inbox handoff, recovery root) runs end to end, and
 /// the session persists in --dir for later `send`s.
 fn offer(flags: &HashMap<String, String>) {
     let dir = PathBuf::from(required(flags, "--dir"));
     let relay = required(flags, "--relay");
-    let wait_secs: u64 = flags.get("--wait-secs").map_or(DEFAULT_WAIT_SECS, |s| {
-        s.parse().expect("--wait-secs must be a number")
-    });
 
     let client = open_client(&dir, relay);
     let before: HashSet<[u8; 16]> = client
@@ -163,6 +160,15 @@ fn offer(flags: &HashMap<String, String>) {
     let payload = client
         .export_pairing_offer()
         .expect("export offer (is the relay reachable and the pin set?)");
+    // The wait fuse := the offer's embedded ttl_s (pair-offer v3 freeze §6),
+    // read back from the minted bytes — single-sourced with the UI countdown;
+    // the former DEFAULT_WAIT_SECS constant is retired.
+    let wait_secs = u64::from(
+        client
+            .peek_offer_validity(payload.as_bytes())
+            .expect("read embedded offer validity")
+            .ttl_s,
+    );
     println!("{LINK_PREFIX}{}", b64url_encode(payload.as_bytes()));
     println!("offer minted — scan/paste it on the device within {wait_secs}s (single-use)");
 
@@ -174,7 +180,7 @@ fn offer(flags: &HashMap<String, String>) {
             return;
         }
     }
-    eprintln!("no pairing completed within {wait_secs}s (the offer may stay live until its TTL)");
+    eprintln!("no pairing completed within {wait_secs}s (the offer is dead past its TTL)");
     std::process::exit(1);
 }
 

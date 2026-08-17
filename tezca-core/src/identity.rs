@@ -184,6 +184,21 @@ pub fn local_address(store: &Store) -> Result<String> {
     .map_err(sql_err)
 }
 
+/// Loads the persisted identity keypair — the v3 offer mint path signs
+/// `offer_sig` with its private half (freeze §3, INV-6).
+pub(crate) fn identity_keypair(store: &Store) -> Result<IdentityKeyPair> {
+    let identity_bytes: Vec<u8> = {
+        let conn = store.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT identity_keypair FROM local_identity WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_err)?
+    };
+    IdentityKeyPair::try_from(identity_bytes.as_slice()).map_err(signal_err)
+}
+
 /// Serializes a pairing bundle (`proto/pairing.md`, A7) advertising the
 /// long-lived identity/signed/kyber material plus the given one-time prekey
 /// `(id, public)`. Shared by the offer path ([`export_offer_bundle`]) and the
