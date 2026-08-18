@@ -55,6 +55,20 @@ pub enum TitlanError {
     /// proof-of-scan failure).
     #[error("pairing offer signature invalid")]
     OfferSignatureInvalid,
+    /// The responder's `pair-ack` failed proof-of-scan verification (crypto
+    /// class; the offer is burned — 5a-2 four-way surface, P5-D2).
+    #[error("proof-of-scan verification failed")]
+    ProofOfScanFailed,
+    /// Structurally invalid input — truncated/oversized fields, trailing
+    /// bytes, or an unsupported payload/offer version (v1/v2 offers land
+    /// here, never in a crypto class — 5a-2 four-way surface, P5-D2).
+    #[error("malformed input: {msg}")]
+    Malformed { msg: String },
+    /// Underlying libsignal protocol failure (mirror of
+    /// [`crate::CoreError::Signal`]; on the pairing path these are key-decode
+    /// and PQXDH failures — the Kotlin pairing mapper classes them CRYPTO).
+    #[error("protocol error: {msg}")]
+    Protocol { msg: String },
     #[error("network error: {msg}")]
     Network { msg: String },
     #[error("{msg}")]
@@ -391,5 +405,179 @@ impl FfiClient {
     /// infallible in the current implementation.
     pub fn stop_sync(&self) -> std::result::Result<(), TitlanError> {
         Ok(self.inner.stop_sync()?)
+    }
+}
+
+// ---- 5a-2: four-way failure-surface classification at the FFI boundary ----
+// (P5-D2, ratified 2026-08-05; freeze §5 seam — 5a-1 landed the core
+// variants, 5a-2 makes the four-way class visible across the FFI so the
+// Kotlin dialog mapper can distinguish network / expired / malformed /
+// crypto without string inspection. The classes live in the VARIANTS; the
+// user vocabulary lives in the Kotlin mapper.)
+#[cfg(test)]
+mod classification_tests {
+    use super::TitlanError;
+    use crate::CoreError;
+    use crate::error::OfferExpiryDetail;
+
+    /// The audited accept-path-reachable set (evidence log [AUD.A]) mapped to
+    /// its FFI classification — TOTAL: no offer-caused or transport failure
+    /// may fall through to `Other` (the internal class). Deliberate INTERNAL
+    /// assignments (`Storage`, `PayloadTooLarge`) are asserted LAST as
+    /// `Other`, so this test pins the whole table.
+    #[test]
+    fn accept_path_classification_is_total_and_four_way() {
+        // NETWORK-UNREACHABLE class.
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::Network("relay unreachable".into())),
+                TitlanError::Network { .. }
+            ),
+            "Network must map to TitlanError::Network"
+        );
+        // EXPIRED class: both details, fields preserved (timestamps only).
+        for detail in [OfferExpiryDetail::Expired, OfferExpiryDetail::NotYetValid] {
+            match TitlanError::from(CoreError::OfferExpired {
+                issued_at: 1_755_000_000,
+                ttl_s: 3600,
+                now: 1_755_010_000,
+                detail,
+            }) {
+                TitlanError::OfferExpired {
+                    issued_at,
+                    ttl_s,
+                    now,
+                    ..
+                } => {
+                    assert_eq!(issued_at, 1_755_000_000, "issued_at carried");
+                    assert_eq!(ttl_s, 3600, "ttl_s carried");
+                    assert_eq!(now, 1_755_010_000, "now carried");
+                }
+                other => panic!("OfferExpired({detail:?}) must stay OfferExpired, got {other:?}"),
+            }
+        }
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::PairingUnavailable),
+                TitlanError::PairingUnavailable
+            ),
+            "PairingUnavailable must stay distinct (EXPIRED class in the mapper)"
+        );
+        // CRYPTO class: signature, distinct.
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::OfferSignatureInvalid),
+                TitlanError::OfferSignatureInvalid
+            ),
+            "OfferSignatureInvalid must stay distinct"
+        );
+        // MALFORMED class: structural decode failures…
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::Malformed("trailing bytes in pairing offer")),
+                TitlanError::Malformed { .. }
+            ),
+            "Malformed must map to TitlanError::Malformed (class MALFORMED), not Other"
+        );
+        // …AND unsupported-version (v1/v2 bytes).
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::UnsupportedVersion { got: 2 }),
+                TitlanError::Malformed { .. }
+            ),
+            "UnsupportedVersion must map to TitlanError::Malformed (class MALFORMED), not Other"
+        );
+        // CRYPTO class: proof-of-scan and libsignal processing.
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::ProofOfScanFailed),
+                TitlanError::ProofOfScanFailed
+            ),
+            "ProofOfScanFailed must map to TitlanError::ProofOfScanFailed, not Other"
+        );
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::Signal("bad key data".into())),
+                TitlanError::Protocol { .. }
+            ),
+            "Signal must map to TitlanError::Protocol (class CRYPTO on the pairing path)"
+        );
+        // Deliberate INTERNAL class: device-local faults stay in Other.
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::Storage("disk full".into())),
+                TitlanError::Other { .. }
+            ),
+            "Storage is the INTERNAL class: Other"
+        );
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::PayloadTooLarge {
+                    len: 9000,
+                    max: 8186
+                }),
+                TitlanError::Other { .. }
+            ),
+            "PayloadTooLarge is the INTERNAL class: Other"
+        );
+    }
+
+    /// Negative pin (order: "unsupported-version never surfaces as crypto"):
+    /// the structural family maps to `Malformed` and to NO crypto-class
+    /// variant.
+    #[test]
+    fn structural_family_never_surfaces_as_crypto() {
+        for e in [
+            CoreError::UnsupportedVersion { got: 1 },
+            CoreError::UnsupportedVersion { got: 2 },
+            CoreError::Malformed("offer ttl_s out of range"),
+        ] {
+            let mapped = TitlanError::from(e);
+            assert!(
+                !matches!(
+                    mapped,
+                    TitlanError::OfferSignatureInvalid
+                        | TitlanError::ProofOfScanFailed
+                        | TitlanError::Protocol { .. }
+                ),
+                "structural failure must never surface as a crypto-class variant, got {mapped:?}"
+            );
+            assert!(
+                matches!(mapped, TitlanError::Malformed { .. }),
+                "structural failure must surface as Malformed, got {mapped:?}"
+            );
+        }
+    }
+
+    /// Negative pin (order: "signature failure never surfaces as expired"):
+    /// every crypto-class failure maps to its own distinct variant and never
+    /// to `OfferExpired`.
+    #[test]
+    fn crypto_family_is_distinct_and_never_expired() {
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::ProofOfScanFailed),
+                TitlanError::ProofOfScanFailed
+            ),
+            "ProofOfScanFailed must map to its own variant, not Other"
+        );
+        assert!(
+            matches!(
+                TitlanError::from(CoreError::Signal("PQXDH failure".into())),
+                TitlanError::Protocol { .. }
+            ),
+            "Signal must map to Protocol, not Other"
+        );
+        for e in [
+            CoreError::OfferSignatureInvalid,
+            CoreError::ProofOfScanFailed,
+            CoreError::Signal("PQXDH failure".into()),
+        ] {
+            let mapped = TitlanError::from(e);
+            assert!(
+                !matches!(mapped, TitlanError::OfferExpired { .. }),
+                "a crypto-class failure must never surface as expired, got {mapped:?}"
+            );
+        }
     }
 }
