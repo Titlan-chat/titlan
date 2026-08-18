@@ -207,19 +207,20 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
     }
 
     val scope = rememberCoroutineScope()
-    var acceptFailed by remember { mutableStateOf(false) }
+    var acceptFailure by remember { mutableStateOf<String?>(null) }
 
     // Establishing the session is a relay round-trip (pair-ack → inbox
-    // handoff) — kept off the main thread. Failure re-arms the scanner.
+    // handoff) — kept off the main thread. Failure re-arms the scanner and
+    // surfaces the four-way classified copy (P5-D2), not a unified dialog.
     fun establish(bytes: ByteArray) {
         scope.launch {
-            acceptFailed = false
+            acceptFailure = null
             runCatching {
                 withContext(Dispatchers.IO) { PairingCoordinator.acceptScannedOffer(bytes) }
             }
                 .onSuccess(onPaired)
                 .onFailure {
-                    acceptFailed = true
+                    acceptFailure = PairingFailure.userMessage(it)
                     scanned = null
                     pendingRelay = null
                 }
@@ -241,7 +242,7 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
         }
     }
 
-    if (acceptFailed) Text("Pairing failed — the offer may be stale or malformed. Try a fresh one.")
+    acceptFailure?.let { Text(it) }
 
     val relayPending = pendingRelay
     if (relayPending != null) {
@@ -303,11 +304,13 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
         )
         OutlinedTextField(value = pasted, onValueChange = { pasted = it }, modifier = Modifier.fillMaxWidth())
         Button(onClick = {
-            // A malformed paste must not crash the screen — surface the same
-            // failed state the session path uses.
+            // A malformed paste must not crash the screen — it is a decode
+            // failure, so it surfaces the MALFORMED class copy directly.
             runCatching { QrCodec.decodeLink(pasted.trim()) }
                 .onSuccess(::onOfferBytes)
-                .onFailure { acceptFailed = true }
+                .onFailure {
+                    acceptFailure = PairingFailure.userMessage(PairingFailureClass.MALFORMED)
+                }
         }) { Text("Pair from link") }
     }
 

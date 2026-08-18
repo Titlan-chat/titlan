@@ -96,7 +96,18 @@ impl From<crate::CoreError> for TitlanError {
                 },
             },
             crate::CoreError::OfferSignatureInvalid => TitlanError::OfferSignatureInvalid,
+            crate::CoreError::ProofOfScanFailed => TitlanError::ProofOfScanFailed,
+            // The structural family (5a-2 four-way surface): decode failures
+            // and unsupported versions are MALFORMED across the FFI — v1/v2
+            // offer bytes land here, never in a crypto class.
+            crate::CoreError::Malformed(m) => TitlanError::Malformed { msg: m.into() },
+            crate::CoreError::UnsupportedVersion { got } => TitlanError::Malformed {
+                msg: format!("unsupported version {got}"),
+            },
+            crate::CoreError::Signal(m) => TitlanError::Protocol { msg: m },
             crate::CoreError::Network(m) => TitlanError::Network { msg: m },
+            // Everything else (storage, envelope internals, replay, …) is the
+            // INTERNAL class: device-local, not the peer offer's doing.
             other => TitlanError::Other {
                 msg: other.to_string(),
             },
