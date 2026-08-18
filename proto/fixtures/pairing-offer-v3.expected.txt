@@ -1,0 +1,9 @@
+decoded_sha256=0ca28087829460ae7be5c115304cc5a0abe1c1a2487eb507dfa546dbf4bb6e2b
+decoded_len=2073
+relay=wss://127.0.0.1:8443
+inbox=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+onetime_id=2
+bundle_len=1897
+identity_pub=0564609c4db60b695cc0086de114022eae49eaef4ecb1bc8af0d94b4cc1576ed25
+issued_at=1755000000
+ttl_s=3600

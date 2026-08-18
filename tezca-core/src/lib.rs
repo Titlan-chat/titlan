@@ -26,6 +26,8 @@ pub mod ffi;
 pub mod identity;
 pub mod licensing;
 pub(crate) mod pairing;
+#[cfg(test)]
+mod pairing_v3_acceptance;
 pub(crate) mod recovery;
 pub(crate) mod relay_client;
 pub mod session;

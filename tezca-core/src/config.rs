@@ -9,6 +9,29 @@
 /// Titlan domain purchase (work order §10.4).
 pub const DEFAULT_RELAY_URL: &str = "wss://relay.invalid/v1";
 
+/// Loopback relay URL pinned by test fixtures. Test scratch URLs are exempt
+/// from the INV-5 sweep by design (family 14), but the sweep's
+/// `#[cfg(test)]`-module tracking is per-file and cannot see a module gated
+/// at its `lib.rs` declaration — so file-level test modules take the literal
+/// from here, the sanctioned single source, instead of pinning their own.
+#[cfg(test)]
+pub(crate) const TEST_LOOPBACK_RELAY_URL: &str = "wss://127.0.0.1:8443";
+
+// --- Pair-offer v3 validity constants (freeze
+// `docs/design/2026-08-pair-offer-v3-freeze.md` §4/§6, V3-D2) — the SINGLE
+// source for every consumer: mint path, acceptor validity rule, UI countdown,
+// deposit-harness fuse, offerer-side delete timer. -------------------------
+
+/// Default pairing-offer TTL written by the mint path (H7: 1 h).
+pub const OFFER_DEFAULT_TTL_S: u32 = 3600;
+
+/// Maximum `ttl_s` an acceptor admits; out-of-range is malformed (§4 step 2).
+pub const MAX_OFFER_TTL_S: u32 = 86_400;
+
+/// Future-skew grace: an offer with `issued_at > now + FUTURE_SKEW_S` is
+/// `NotYetValid` (§4 step 3).
+pub const FUTURE_SKEW_S: u64 = 300;
+
 /// A padding profile: the set of allowed inner-frame bucket sizes.
 ///
 /// Resolved work order §10.2 (2026-07-14): default is 512 B / 2 KiB / 8 KiB,

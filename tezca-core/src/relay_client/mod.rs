@@ -203,38 +203,69 @@ impl Engine {
         http::deposit(&self.http, relay, mailbox, blob).await
     }
 
-    // ---- pairing v2 (offer + proof-of-scan; frozen §3, B1/B2) ----
+    // ---- pairing (v3 offer + v2 proof-of-scan ack; frozen §3, B1/B2;
+    //      offer v3 per docs/design/2026-08-pair-offer-v3-freeze.md) ----
 
-    /// Offerer (A): create the single-use pairing inbox, mint a 256-bit pairing
-    /// secret, spawn the v2 listener bound to that secret, and return the offer
-    /// bytes (bundle + relay + inbox + secret). B2: the recovery-root
+    /// Offerer (A): create the single-use pairing inbox, mint a 256-bit
+    /// pairing secret, and return the v3 offer bytes — bundle, relay, inbox,
+    /// secret, and an authenticated validity window (`issued_at` = offerer
+    /// clock, `ttl_s` = [`crate::config::OFFER_DEFAULT_TTL_S`], `offer_sig`
+    /// by the identity private key; freeze §2/§3). Spawns the pairing
+    /// listener fused to that same embedded TTL (§6). B2: the recovery-root
     /// contribution is NOT in the offer.
     pub(crate) async fn export_offer(self: &Arc<Self>, bundle: &[u8]) -> Result<Vec<u8>> {
         let pairing_inbox = self.create_mailbox().await?;
         let secret = random_32();
-        self.spawn_pairing_v2(pairing_inbox.clone(), secret);
-        Ok(pairing::encode_pairing_offer(
+        let issued_at = unix_now();
+        let ttl_s = crate::config::OFFER_DEFAULT_TTL_S;
+        let identity = identity::identity_keypair(&self.store)?;
+        let payload = pairing::encode_pairing_offer_v3(
             bundle,
             &self.my_relay,
             &pairing_inbox,
             &secret,
-        ))
+            issued_at,
+            ttl_s,
+            identity.private_key(),
+        )?;
+        self.spawn_pairing_v2(pairing_inbox, secret, Duration::from_secs(u64::from(ttl_s)));
+        Ok(payload)
     }
 
-    /// Spawns the v2 pairing listener bound to the offer's secret.
-    fn spawn_pairing_v2(self: &Arc<Self>, pairing_inbox: String, secret: [u8; PAIRING_SECRET_LEN]) {
+    /// Spawns the pairing listener bound to the offer's secret, fused to the
+    /// offer's embedded TTL: at `issued_at + ttl_s` the listener stops and
+    /// deletes the pairing mailbox (freeze §6 offerer-side SHOULD-delete —
+    /// the existing oracle-free DELETE, best-effort).
+    fn spawn_pairing_v2(
+        self: &Arc<Self>,
+        pairing_inbox: String,
+        secret: [u8; PAIRING_SECRET_LEN],
+        ttl: Duration,
+    ) {
         let engine = self.clone();
-        self.handle
-            .spawn(async move { pairing_listener_v2(engine, pairing_inbox, secret).await });
+        self.handle.spawn(async move {
+            let listener = pairing_listener_v2(engine.clone(), pairing_inbox.clone(), secret);
+            if tokio::time::timeout(ttl, listener).await.is_err() {
+                let _ = http::delete_mailbox(&engine.http, &engine.my_relay, &pairing_inbox).await;
+            }
+        });
     }
 
-    /// Responder (B): consume a scanned offer — PQXDH against A's bundle, create
-    /// B's inbox, mint B's recovery contribution, send `pair-ack/2` (bundle +
-    /// coords + contribution + proof-of-scan MAC) to A's pairing inbox, then
-    /// await A's `inbox-handoff` (`mailbox-update/2`, carrying A's contribution)
-    /// and compute the shared recovery root. Returns the conversation id.
+    /// Responder (B): consume a scanned v3 offer — decode-time validity FIRST
+    /// (freeze §4: signature + TTL window at the acceptor clock, BEFORE any
+    /// network I/O), then PQXDH against A's bundle, create B's inbox, mint B's
+    /// recovery contribution, send `pair-ack/2` (bundle + coords +
+    /// contribution + proof-of-scan MAC) to A's pairing inbox, then await A's
+    /// `inbox-handoff` (`mailbox-update/2`, carrying A's contribution) and
+    /// compute the shared recovery root. Returns the conversation id.
     pub(crate) async fn begin_pairing_from_offer(&self, payload: &[u8]) -> Result<ConversationId> {
-        let (bundle, peer_relay, pairing_inbox, secret) = pairing::parse_pairing_offer(payload)?;
+        let offer = pairing::parse_pairing_offer_v3(payload, unix_now())?;
+        let (bundle, peer_relay, pairing_inbox, secret) = (
+            offer.bundle,
+            offer.relay_url,
+            offer.pairing_inbox_id,
+            offer.pairing_secret,
+        );
         let peer_addr = session::establish_session(&self.store, &bundle)?;
         let my_inbox = self.create_mailbox().await?;
         let conv =
@@ -1028,6 +1059,16 @@ async fn pairing_listener_v2(
             Connected::Unreachable => tokio::time::sleep(Duration::from_millis(200)).await,
         }
     }
+}
+
+/// Unix seconds on the system clock — the production `now` for the v3 offer
+/// validity rule (mint `issued_at`, acceptor evaluation; the tests inject a
+/// deterministic instant through `parse_pairing_offer_v3`'s parameter).
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before epoch")
+        .as_secs()
 }
 
 fn random_seed() -> u64 {

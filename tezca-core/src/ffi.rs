@@ -27,11 +27,34 @@ pub fn generate_db_key() -> Vec<u8> {
     DbKey::generate().as_bytes().to_vec()
 }
 
+/// Which validity bound a rejected v3 offer failed (mirror of
+/// [`crate::error::OfferExpiryDetail`]; freeze §5 — one user surface for
+/// both, distinct details for diagnostics).
+#[derive(Debug, Clone, Copy, uniffi::Enum)]
+pub enum FfiOfferExpiryDetail {
+    Expired,
+    NotYetValid,
+}
+
 /// FFI error surfaced to Kotlin (flattened from [`crate::CoreError`]).
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum TitlanError {
     #[error("pairing inbox unavailable (stale QR)")]
     PairingUnavailable,
+    /// A scanned offer is outside its embedded validity window (freeze §5;
+    /// raised at decode, before any network I/O — timestamps only, no INV-1
+    /// exposure).
+    #[error("pairing offer outside validity (issued_at {issued_at}, ttl {ttl_s} s, now {now})")]
+    OfferExpired {
+        issued_at: u64,
+        ttl_s: u32,
+        now: u64,
+        detail: FfiOfferExpiryDetail,
+    },
+    /// The offer's `offer_sig` did not verify (crypto class, distinct from
+    /// proof-of-scan failure).
+    #[error("pairing offer signature invalid")]
+    OfferSignatureInvalid,
     #[error("network error: {msg}")]
     Network { msg: String },
     #[error("{msg}")]
@@ -42,6 +65,23 @@ impl From<crate::CoreError> for TitlanError {
     fn from(e: crate::CoreError) -> Self {
         match e {
             crate::CoreError::PairingUnavailable => TitlanError::PairingUnavailable,
+            crate::CoreError::OfferExpired {
+                issued_at,
+                ttl_s,
+                now,
+                detail,
+            } => TitlanError::OfferExpired {
+                issued_at,
+                ttl_s,
+                now,
+                detail: match detail {
+                    crate::error::OfferExpiryDetail::Expired => FfiOfferExpiryDetail::Expired,
+                    crate::error::OfferExpiryDetail::NotYetValid => {
+                        FfiOfferExpiryDetail::NotYetValid
+                    }
+                },
+            },
+            crate::CoreError::OfferSignatureInvalid => TitlanError::OfferSignatureInvalid,
             crate::CoreError::Network(m) => TitlanError::Network { msg: m },
             other => TitlanError::Other {
                 msg: other.to_string(),
@@ -140,6 +180,17 @@ impl ConnectionObserver for ObserverAdapter {
     }
 }
 
+/// The embedded validity window of a v3 offer (mirror of
+/// [`crate::client::OfferValidity`]; freeze §6 — the ONE governing value the
+/// UI countdown reads).
+#[derive(uniffi::Record)]
+pub struct FfiOfferValidity {
+    /// Mint time embedded in the offer (Unix seconds, offerer clock).
+    pub issued_at: u64,
+    /// Time-to-live embedded in the offer, in seconds.
+    pub ttl_s: u32,
+}
+
 /// The Kotlin-facing client object.
 #[derive(uniffi::Object)]
 pub struct FfiClient {
@@ -198,7 +249,8 @@ impl FfiClient {
         Ok(self.inner.is_initialized()?)
     }
 
-    /// v2 asymmetric offer export (proof-of-scan + derived-recovery pairing).
+    /// v3 asymmetric offer export (authenticated embedded validity +
+    /// proof-of-scan + derived-recovery pairing).
     ///
     /// # Errors
     ///
@@ -209,13 +261,15 @@ impl FfiClient {
         Ok(self.inner.export_pairing_offer()?.as_bytes().to_vec())
     }
 
-    /// Consumes a scanned v2 offer; returns the new conversation id.
+    /// Consumes a scanned v3 offer; returns the new conversation id. Validity
+    /// is evaluated at decode, BEFORE any network I/O (freeze §4).
     ///
     /// # Errors
     ///
-    /// Returns [`TitlanError::PairingUnavailable`] for a stale offer, otherwise
-    /// the [`CoreError`] mapping of parse, network, storage, and libsignal
-    /// handshake failures.
+    /// Returns [`TitlanError::OfferExpired`]/[`TitlanError::OfferSignatureInvalid`]
+    /// from the decode-time validity rule, [`TitlanError::PairingUnavailable`]
+    /// for a stale offer, otherwise the [`CoreError`] mapping of parse,
+    /// network, storage, and libsignal handshake failures.
     pub fn begin_pairing_from_offer(
         &self,
         payload: Vec<u8>,
@@ -229,10 +283,30 @@ impl FfiClient {
     ///
     /// # Errors
     ///
-    /// Returns the [`CoreError::Malformed`] mapping when `payload` is not a
-    /// valid v2 offer.
+    /// Returns the [`CoreError`] mapping when `payload` is not structurally a
+    /// v3 offer.
     pub fn peek_offer_relay(&self, payload: Vec<u8>) -> std::result::Result<String, TitlanError> {
         Ok(self.inner.peek_offer_relay(&payload)?)
+    }
+
+    /// Reads the embedded validity window (`issued_at`, `ttl_s`) from a
+    /// minted/scanned offer WITHOUT accepting it — the single source for the
+    /// UI countdown (freeze §6; the display-only Kotlin TTL constant is
+    /// deleted in the same change).
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError`] mapping when `payload` is not structurally a
+    /// v3 offer.
+    pub fn peek_offer_validity(
+        &self,
+        payload: Vec<u8>,
+    ) -> std::result::Result<FfiOfferValidity, TitlanError> {
+        let v = self.inner.peek_offer_validity(&payload)?;
+        Ok(FfiOfferValidity {
+            issued_at: v.issued_at,
+            ttl_s: v.ttl_s,
+        })
     }
 
     ///

@@ -28,7 +28,8 @@ interface CoreClient : AutoCloseable {
     /** True once an identity exists in the encrypted store. */
     fun isInitialized(): Boolean
 
-    /** Offerer side: mints a v2 pairing offer (bundle + relay + secret). */
+    /** Offerer side: mints a v3 pairing offer (bundle + relay + secret + an
+     * authenticated embedded validity window). */
     fun exportPairingOffer(): ByteArray
 
     /** Responder side: consumes a scanned offer; returns the conversation id. */
@@ -36,6 +37,13 @@ interface CoreClient : AutoCloseable {
 
     /** Reads a scanned offer's relay without establishing a session (§3). */
     fun peekOfferRelay(offerBytes: ByteArray): String
+
+    /**
+     * Reads the embedded validity window from a minted/scanned offer without
+     * accepting it (pair-offer v3 freeze §6): the countdown reads the offer,
+     * not a UI-side constant.
+     */
+    fun peekOfferValidity(offerBytes: ByteArray): OfferValidity
 
     /** All known conversation ids (16 bytes each). */
     fun listConversations(): List<ByteArray>
@@ -55,6 +63,13 @@ interface CoreClient : AutoCloseable {
     /** Stops all sync tasks in core. */
     fun stopSync()
 }
+
+/**
+ * The validity window a v3 offer embeds at mint (pair-offer v3 freeze §2/§6):
+ * epoch-seconds mint time (offerer clock) and TTL in seconds. App-side mirror
+ * of the core record so generated types stay inside this file.
+ */
+data class OfferValidity(val issuedAtEpochSeconds: Long, val ttlSeconds: Long)
 
 object CoreClientFactory {
     /**
@@ -84,6 +99,11 @@ private class FfiCoreClient(private val ffi: FfiClient) : CoreClient {
     }
 
     override fun peekOfferRelay(offerBytes: ByteArray): String = ffi.peekOfferRelay(offerBytes)
+
+    override fun peekOfferValidity(offerBytes: ByteArray): OfferValidity {
+        val v = ffi.peekOfferValidity(offerBytes)
+        return OfferValidity(v.issuedAt.toLong(), v.ttlS.toLong())
+    }
 
     override fun listConversations(): List<ByteArray> = ffi.listConversations()
     override fun setConversationRelay(conversationId: ByteArray, relayUrl: String) =
