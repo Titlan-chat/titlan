@@ -3,7 +3,7 @@
 
 # Titlan Inner Frame — Message / Control Discrimination
 
-**Status: NORMATIVE for Phase 4b-2** (frozen design 2026-07-18, §3/§8;
+**Status: FROZEN — Titlan wire protocol spec 1.0 (Phase 5, unit 5a-3); normative since Phase 4b-2** (frozen design 2026-07-18, §3/§8;
 registry ratified 2026-07-19; maintainer-ratified B1/B2 + F1/F2 2026-07-19 —
 dual-contribution recovery root, HMAC-PRF mailbox derivation, proof over
 `bundle ‖ contribution`, inbox-handoff `/2` pairing vs `/3` rotation). This document specifies how a receiver tells a
@@ -11,6 +11,11 @@ dual-contribution recovery root, HMAC-PRF mailbox derivation, proof over
 payload, and defines the control frames 4b-2 uses: the pairing response
 `pair-ack/2`, the rotation announcement `inbox-handoff`, and the recovery
 probe `recovery-hello`. It is third-party implementable.
+
+Companions: `proto/envelope.md` (registry, §Control-frame payload header, §Unknown
+and unsupported types — the normative ack-and-discard rule), `proto/recovery.md`
+(the §10.7 recovery protocol that uses the frames below, as implemented),
+`proto/pairing.md` (bundle, offer v3, `mailbox-update/1`).
 
 **The A8 outer envelope enum is UNTOUCHED.** Outer `kind` stays exactly
 `0x01` session-setup / `0x02` ratchet (`proto/envelope.md` Layer 1). All
@@ -40,7 +45,8 @@ message, or vice-versa, is a conformance failure.
 ## Control frame: `pair-ack/2` (pairing response + proof-of-scan)
 
 `pair-ack/2` is the responder's (B's) FIRST sealed frame back to the offerer
-(A) after a v2 offer scan (frozen design §3; `proto/pairing.md`). It proves
+(A) after an offer scan (pair-offer **v3** at spec 1.0 — `proto/pairing.md`
+Part II; the frame itself is unchanged since the v2 offer, freeze §7). It proves
 possession of the scanned offer and, in the SAME frame, announces B's own
 routing inbox — so the return direction (B→A) needs no separate
 `inbox-handoff` at pairing.
@@ -52,7 +58,7 @@ cleanly (`RecognizedButUnsupported`) rather than mis-parsing.
 | field | encoding |
 |---|---|
 | version | u8 = `0x02` |
-| responder_bundle | B's pairing bundle (self-delimiting, `proto/pairing.md` §Pairing bundle) — identity key + signed / Kyber / one-time prekeys |
+| responder_bundle | u16 len + B's pairing bundle (`proto/pairing.md` §Pairing bundle) — identity key + signed / Kyber / one-time prekeys |
 | relay_url | u16 len + UTF-8 (B's relay for this conversation) |
 | inbox_id | 43 bytes ASCII (B's per-conversation inbox) |
 | recovery_root_contribution | 32 bytes CSPRNG — B's contribution to the §8 recovery root (B2; never in the offer) |
@@ -236,10 +242,10 @@ Rules:
   pair has already been seen is acknowledged but NOT reprocessed, so
   redeliveries (the idempotent probe hitting multiple window generations) are
   applied exactly once.
-- Dedup **retention 14 days** (config, aligned to the relay message TTL —
-  `relay-api.md` `--ttl-secs`; an entry older than one TTL is unreplayable, so
-  it may be evicted safely), with a **512-entry per-conversation cap**,
-  oldest-evicted (config).
+- Dedup window: a **512-entry per-conversation ring** of seen
+  `(generation, nonce)` pairs, oldest-evicted. The ring is held in memory
+  only (it does not survive process restart) and has no time-based eviction
+  and no configuration knob (`recovery.md` §4 describes the same ring).
 
 ### Registry status (MAINTAINER-RATIFIED 2026-07-19)
 
@@ -256,3 +262,19 @@ Ratified for 4b-2:
   `tezca-core/src/envelope/inner.rs` land in the 4b-2 GREEN commit, per the
   standing convention that the RED commit ships only the ratified spec, not
   new registry code.
+
+## Conformance vectors
+
+No standalone fixture files exist for the control frames in this document;
+their layouts are pinned by the reference codec tests in
+`tezca-core/src/pairing.rs` (`pair_ack_v2_roundtrips_and_carries_verifiable_proof`,
+`mailbox_update_v2_roundtrips_contribution`,
+`mailbox_update_v1_with_trailing_bytes_is_malformed`) and
+`tezca-core/src/recovery.rs` (`recovery_hello_round_trips_and_rejects_malformed`,
+`mailbox_ids_are_43_chars_and_role_generation_separated`,
+`root_is_symmetric_across_parties_but_order_sensitive`), and end-to-end by
+`tezca-relay/tests/relay_client_e2e.rs` (`pair_v2_offer_proof_and_exchange`,
+`v2_single_total_loss_recovers_via_derived_mailboxes`,
+`v2_two_consecutive_total_losses_each_recover`). The committed pairing-offer
+vectors (`proto/fixtures/pairing-offer-v3.*`, accept; `pairing-offer-v2.*`,
+reject) are described in `proto/pairing.md` §Conformance vectors.
