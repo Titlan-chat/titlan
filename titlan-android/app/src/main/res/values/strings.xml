@@ -10,4 +10,12 @@
 <resources>
     <string name="app_name">Titlan</string>
     <string name="scaffold_placeholder">Titlan</string>
+    <!--
+      Per-path security claim (proto/pairing.md, NORMATIVE): the same offer
+      bytes travel two carriers with different exposure, and the UI must say
+      so on the link path. Drafted 5a-3 (F7); wording is maintainer
+      copy-review territory, the unit test pins only presence and the
+      QR-is-stronger keyword.
+    -->
+    <string name="pairing_link_path_security">Link pairing is weaker than QR: anyone who reads the link in transit — chat apps, clipboard managers, browser history — holds the whole offer and can pair with you instead of the person you meant. Scan the QR in person whenever you can.</string>
 </resources>

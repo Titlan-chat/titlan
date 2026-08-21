@@ -72,6 +72,17 @@ async fn serve(cfg: Config) {
         let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)
             .await
             .expect("load TLS certificate/key");
+        // F6 (ratified 2026-08-20): advertise `http/1.1` and NOTHING else.
+        // axum-server's PEM constructors default to ["h2", "http/1.1"], but
+        // this relay serves HTTP/1.1 plus the WebSocket upgrade only (axum is
+        // built without the http2 feature), so offering h2 advertises a
+        // protocol surface the server does not implement. Clients that offer
+        // no ALPN at all (the core's tokio-rustls wss path) are unaffected —
+        // rustls only rejects a client whose non-empty offer shares nothing
+        // with ours.
+        let mut server_config = (*tls_config.get_inner()).clone();
+        server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        tls_config.reload_from_config(Arc::new(server_config));
         axum_server::bind_rustls(listen, tls_config)
             .serve(app)
             .await

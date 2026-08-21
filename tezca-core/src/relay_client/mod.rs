@@ -500,18 +500,26 @@ impl Engine {
                 }
                 false
             }
-            PayloadType::MailboxUpdate => {
-                if frame.type_version == pairing::MAILBOX_UPDATE_V3 {
-                    self.handle_rotation(conv, &frame.payload).await
-                } else {
-                    // v1 mailbox-update/1 (one-sided recovery for v1 conversations).
+            // Strict version dispatch (F4, ratified 2026-08-20): ONLY 1 reaches
+            // the `/1` parser and ONLY 3 the `/3` rotation. Any other
+            // `type_version` is unknown to this receiver and is ack-and-discarded
+            // per the normative receiver rule — routing it to `/1` on the
+            // strength of a `/1`-shaped body would let an unknown-version frame
+            // rewrite the conversation's send coordinates. (`/2` never arrives
+            // here: the pairing handoff is consumed inline by
+            // `await_inbox_handoff_v2`.)
+            PayloadType::MailboxUpdate => match frame.type_version {
+                pairing::MAILBOX_UPDATE_V3 => self.handle_rotation(conv, &frame.payload).await,
+                // mailbox-update/1 (one-sided recovery for v1 conversations).
+                pairing::MAILBOX_UPDATE_V1 => {
                     if let Ok((relay, inbox)) = pairing::parse_mailbox_update(&frame.payload) {
                         let _ = self.store.set_conversation_send(conv, &relay, &inbox);
                         let _ = self.flush_pending(conv).await;
                     }
                     false
                 }
-            }
+                _ => false,
+            },
             PayloadType::RecoveryHello => self.handle_recovery_hello(conv, &frame.payload).await,
             _ => false, // pair-ack / reserved types are not expected on a conv inbox
         }
@@ -557,7 +565,7 @@ impl Engine {
         };
         let update = InnerFrame {
             payload_type: PayloadType::MailboxUpdate,
-            type_version: 1,
+            type_version: pairing::MAILBOX_UPDATE_V1,
             payload: pairing::encode_mailbox_update(&self.my_relay, &new_inbox),
         };
         let Ok(wire) =
