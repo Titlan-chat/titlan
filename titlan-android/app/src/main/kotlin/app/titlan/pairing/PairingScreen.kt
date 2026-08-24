@@ -41,11 +41,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.titlan.BuildConfig
+import app.titlan.R
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
 import com.google.zxing.PlanarYUVLuminanceSource
@@ -301,6 +303,14 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
         Text(
             if (scanning) "Trouble scanning? Paste the titlan://pair# link:"
             else "Paste the titlan://pair# link to pair:",
+        )
+        // F7 (ratified 2026-08-20): proto/pairing.md's per-path security
+        // claims are NORMATIVE — the link carrier has strictly weaker
+        // guarantees than QR, and the UI must state so wherever the link path
+        // is offered.
+        Text(
+            text = stringResource(R.string.pairing_link_path_security),
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
         )
         OutlinedTextField(value = pasted, onValueChange = { pasted = it }, modifier = Modifier.fillMaxWidth())
         Button(onClick = {

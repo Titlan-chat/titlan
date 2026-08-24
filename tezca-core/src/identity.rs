@@ -74,7 +74,7 @@ pub fn initialize(store: &Store) -> Result<()> {
     // Address = hex of the serialized identity public key. Deriving it from
     // the identity key (rather than a random id) lets a recipient of a
     // session-setup message compute the sender's address from the message's
-    // embedded identity key — needed to decrypt a `pair-ack/1` arriving on a
+    // embedded identity key — needed to decrypt a `pair-ack/2` arriving on a
     // pairing inbox whose sender is otherwise unknown (blind relay, sealed
     // sender). It is still an unlinkable pseudonym (a public key, no PII).
     let address_name = address_for_identity(identity.identity_key());

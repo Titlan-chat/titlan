@@ -149,6 +149,9 @@ pub(crate) const PAIRING_SECRET_LEN: usize = 32;
 pub(crate) const RECOVERY_CONTRIB_LEN: usize = 32;
 /// `pair-ack` `type_version` for the v2 pairing response (rides byte 0x05).
 pub(crate) const PAIR_ACK_V2: u8 = 2;
+/// `mailbox-update` `type_version` for the Phase-4a one-sided recovery update
+/// (rides 0x06). Its payload is the [`parse_mailbox_update`] shape.
+pub(crate) const MAILBOX_UPDATE_V1: u8 = 1;
 /// `mailbox-update` `type_version` for the v2 pairing inbox-handoff (rides 0x06).
 pub(crate) const MAILBOX_UPDATE_V2: u8 = 2;
 /// `mailbox-update` `type_version` for the v3 recovery-rotation handoff (rides
@@ -440,10 +443,11 @@ pub(crate) fn parse_pair_ack_v2(bytes: &[u8]) -> Result<PairAckV2> {
     })
 }
 
-/// Builds a `mailbox-update/2` inner payload (inbox-handoff / rotation). The
-/// contribution is present (all-32 bytes) at the pairing handoff (carries A's
-/// recovery-root contribution) and ALL-ZERO for a recovery-time rotation, which
-/// re-uses the existing root rather than re-deriving it.
+/// Builds a `mailbox-update/2` inner payload: the pairing inbox-handoff. The
+/// contribution is ALWAYS A's real 32-byte recovery-root contribution — `/2`
+/// carries the handoff and nothing else. Recovery-time rotation is
+/// [`encode_mailbox_update_v3`], which has no contribution field at all
+/// because the root already exists on both ends.
 pub(crate) fn encode_mailbox_update_v2(
     relay_url: &str,
     inbox_id: &str,
@@ -457,8 +461,9 @@ pub(crate) fn encode_mailbox_update_v2(
     out
 }
 
-/// Parses a `mailbox-update/2` payload → (relay, inbox, contribution). An
-/// all-zero contribution means "rotation, no root re-derivation".
+/// Parses a `mailbox-update/2` payload → (relay, inbox, contribution). The
+/// contribution is the peer's recovery-root contribution from the pairing
+/// handoff; rotation rides `/3` and carries none.
 pub(crate) fn parse_mailbox_update_v2(
     bytes: &[u8],
 ) -> Result<(String, String, [u8; RECOVERY_CONTRIB_LEN])> {

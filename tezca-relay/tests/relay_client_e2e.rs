@@ -891,3 +891,143 @@ fn ack_after_persist_holds_across_stop_in_raced_interleavings() {
     }
     alice.stop_sync().expect("final stop");
 }
+
+/// F4 (5a-3 conformance, ratified 2026-08-20): `mailbox-update` dispatch is
+/// STRICT on `type_version`. Only 1 routes to the `/1` parser and only 3 to
+/// `/3`; every other value is ack-and-discard per the normative receiver rule.
+///
+/// The attack this pins: a frame whose `type_version` is outside {1, 3} but
+/// whose body is `/1`-shaped (leading byte 0x01) must NOT be parsed as `/1` —
+/// doing so lets an unknown-version frame rewrite the conversation's send
+/// coordinates and silently redirect every subsequent outbound message.
+///
+/// Receiver-local strictness only: no wire bytes change, and the frame is
+/// minted with the ordinary sealed-session encoder.
+#[test]
+fn mailbox_update_with_unknown_type_version_is_never_processed_as_v1() {
+    let dir = TempDir::new().unwrap();
+    let d = TempDir::new().unwrap();
+    let relay = spawn_relay_at(free_port(), GENEROUS_LIMITS, d.path());
+    let url = format!("ws://{}", relay.base());
+
+    // Alice's key is kept so the test can reopen her store and read the
+    // conversation's send coordinates directly.
+    let alice_key = DbKey::generate();
+    let alice =
+        TitlanClient::open(&dir.path().join("alice.db"), &alice_key, &url).expect("open alice");
+    alice.initialize_identity().expect("init alice");
+    // Bob's key is kept so the test can mint a frame under his live session.
+    let bob_key = DbKey::generate();
+    let bob = TitlanClient::open(&dir.path().join("bob.db"), &bob_key, &url).expect("open bob");
+    bob.initialize_identity().expect("init bob");
+
+    let alice_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), Arc::new(Inbox::default()))
+        .unwrap();
+
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    let conv_a = alice.list_conversations().unwrap()[0];
+
+    // Baseline: the send coordinates Alice legitimately learned at pairing.
+    let alice_store =
+        Store::open(&dir.path().join("alice.db"), &alice_key).expect("reopen alice store");
+    let before = alice_store
+        .get_conversation(&conv_a)
+        .expect("read conversation")
+        .expect("alice conversation exists");
+    let good_send = before
+        .mailbox_send
+        .clone()
+        .expect("bob inbox learned at pairing");
+
+    // A `/1`-shaped mailbox-update body: CONTROL_VERSION 0x01, a u16-BE
+    // length-prefixed relay URL, then a 43-char mailbox id. Hand-built so the
+    // test pins the wire shape, not an internal encoder.
+    let hostile_relay = "ws://hostile.invalid";
+    let hostile_inbox = "H".repeat(43);
+    let mut body = vec![0x01u8];
+    body.extend_from_slice(&u16::try_from(hostile_relay.len()).unwrap().to_be_bytes());
+    body.extend_from_slice(hostile_relay.as_bytes());
+    body.extend_from_slice(hostile_inbox.as_bytes());
+    assert_ne!(
+        Some(&hostile_inbox),
+        before.mailbox_send.as_ref(),
+        "the hostile inbox must differ from the real one (sanity)",
+    );
+
+    // type_version 7: registry-unknown, outside {1, 3}. Sealed under the live
+    // Bob -> Alice session and deposited into Alice's conversation inbox.
+    let bob_store = Store::open(&dir.path().join("bob.db"), &bob_key).expect("reopen bob store");
+    let convo = bob_store
+        .get_conversation(&conv_b)
+        .expect("read conversation")
+        .expect("bob conversation exists");
+    let alice_inbox = convo
+        .mailbox_send
+        .clone()
+        .expect("alice inbox learned at pairing");
+    let unknown = InnerFrame {
+        payload_type: PayloadType::MailboxUpdate,
+        type_version: 7,
+        payload: body,
+    };
+    let wire = session::encrypt_message(
+        &bob_store,
+        &convo.peer_address,
+        &unknown,
+        &PaddingProfile::default_profile(),
+    )
+    .expect("encrypt mailbox-update with unknown type_version");
+    assert_eq!(deposit(&relay.base(), &alice_inbox, &wire).status, 202);
+
+    // FIFO replay: a chat sent after the hostile frame proves the hostile
+    // frame was already dispatched by the time this assertion runs.
+    bob.send_chat(&conv_b, "after unknown mailbox-update")
+        .unwrap();
+    wait_until(|| {
+        alice_rx
+            .texts()
+            .contains(&"after unknown mailbox-update".to_string())
+    });
+
+    // The intended assertion: the send coordinates are untouched.
+    let after = alice_store
+        .get_conversation(&conv_a)
+        .expect("read conversation")
+        .expect("alice conversation exists");
+    assert_eq!(
+        after.mailbox_send.as_deref(),
+        Some(good_send.as_str()),
+        "a mailbox-update with type_version 7 must never be processed as /1 \
+         (send inbox was rewritten to the unknown-version frame's coordinates)",
+    );
+    assert_eq!(
+        after.relay_url, before.relay_url,
+        "a mailbox-update with type_version 7 must never be processed as /1 \
+         (send relay was rewritten to the unknown-version frame's coordinates)",
+    );
+
+    // Discarded, not persisted: only the chat row exists.
+    let rows = alice.messages(&conv_a).unwrap();
+    assert!(
+        rows.iter()
+            .all(|m| m.payload_type == PayloadType::Chat as u8),
+        "an unknown-version mailbox-update must not be persisted, got payload types {:?}",
+        rows.iter().map(|m| m.payload_type).collect::<Vec<_>>(),
+    );
+
+    // Acked: the relay replays un-acked messages to a fresh subscriber, so a
+    // drained mailbox proves ack-and-discard rather than a silent wedge.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    alice.stop_sync().unwrap();
+    let mut ws = ws_subscribe(&relay.base(), &alice_inbox).expect("raw subscribe");
+    assert!(
+        ws_next_message(&mut ws).is_err(),
+        "mailbox must be drained — an un-acked frame would be replayed",
+    );
+    drop(relay);
+}
