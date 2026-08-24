@@ -13,9 +13,9 @@
     <!--
       Per-path security claim (proto/pairing.md, NORMATIVE): the same offer
       bytes travel two carriers with different exposure, and the UI must say
-      so on the link path. Drafted 5a-3 (F7); wording is maintainer
-      copy-review territory, the unit test pins only presence and the
-      QR-is-stronger keyword.
+      so on the link path. Drafted 5a-3 (F7); wording maintainer-ratified
+      2026-08-24 (malware clause added, em dashes removed). The unit test
+      pins only presence and the QR-is-stronger keyword.
     -->
-    <string name="pairing_link_path_security">Link pairing is weaker than QR: anyone who reads the link in transit — chat apps, clipboard managers, browser history — holds the whole offer and can pair with you instead of the person you meant. Scan the QR in person whenever you can.</string>
+    <string name="pairing_link_path_security">Link pairing is weaker than QR. Anyone who reads the link in transit (chat apps, clipboard managers, browser history) holds the whole offer and can pair with you instead of the person you meant. A malicious app on this phone can also claim titlan:// links and capture the offer. Scan the QR in person whenever you can.</string>
 </resources>
