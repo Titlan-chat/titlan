@@ -65,10 +65,26 @@ duplicates the other.
   offer. Split the mapping so network-layer failures surface as reachability
   problems. Evidence: `4b2-WO-ffi-bisect` and the 2026-07-27/28 device
   sessions.
+  **RESOLVED — landed in 5a-2 (PR #40, 2026-08-20); annotated here in 5a-3.**
+  The four-way pairing-failure vocabulary (P5-D2) retired the unified dialog;
+  network-layer failures now surface as reachability problems, distinct from
+  stale/malformed offers (`app/src/main/.../pairing/PairingFailure.kt`).
 - **Offer TTL vs harness wait fuse (design gate, recorded 2026-07-28).** The
   deposit harness's `DEFAULT_WAIT_SECS` is a 600 s wait fuse from mint; the
   frozen design gives offers a 1 h TTL. Reconcile which value governs, and
   where.
+  **RESOLVED — landed in 5a-1 (PR #37, 2026-08-17); annotated here in 5a-3.**
+  One governing value: the offer's own embedded `issued_at + ttl_s`
+  (pair-offer v3 — Horizon freeze §H7, v3 freeze V3-D2/§6). The harness fuse
+  now READS the embedded `ttl_s` through `peek_offer_validity`
+  (`DEFAULT_WAIT_SECS` retired; pinned by
+  `tezca-core/src/pairing_v3_acceptance.rs` `r9_harness_fuse_equals_embedded_ttl`);
+  the UI countdown reads the same value (`OFFER_TTL_MS` deleted;
+  `PairingCoordinator.createOffer`); the acceptor enforces the window
+  (`OfferExpired`, evaluated before any network I/O); the relay's 14 d TTL
+  remains a storage bound only. Spec: `proto/pairing.md` §Single-sourced
+  constants. The 600 s references in `docs/checklists/4b2-pairing-device.md`
+  §2 describe the pre-v3 harness and stand as dated phase records.
 - **Link-paste field usability (4b-3, recorded 2026-07-28).** The §5 paste
   field is reachable only via the camera-permission-denied trigger; with a
   ~2.6 KB link pasted its accept button sits off-screen; the screen does not

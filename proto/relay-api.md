@@ -3,7 +3,8 @@
 
 # Tezca Relay API — Specification v1
 
-**Status: NORMATIVE (Phase 3).** The relay is blind by design (INV-2): it
+**Status: FROZEN — Titlan wire protocol spec 1.0 (Phase 5, unit 5a-3); normative
+since Phase 3.** The relay is blind by design (INV-2): it
 stores opaque padded blobs in RAM with TTL expiry and learns only recipient
 mailbox ID and timing. It never parses, stores, or logs sender identity,
 plaintext, contact graphs, or PII. Nothing in the relay logs at all.
@@ -34,8 +35,15 @@ Deposit one blob (one outer envelope). Body: `application/octet-stream`.
 - `507 Insufficient Storage`: mailbox message/byte capacity reached
 
 The relay validates ONLY the first five bytes of the blob (magic `TZCA` +
-version `0x01`, per `envelope.md`) plus a minimum length. It does not read
-the `kind` byte or anything after it; the ciphertext is opaque.
+version `0x01`, per `envelope.md`) plus a minimum length (9 bytes). It does
+not read the `kind` byte or anything after it; the ciphertext is opaque.
+
+**Version lockstep (Horizon §H4.2).** Because admission pins `blob[4] ==
+0x01`, an outer-envelope version bump is a client-and-relay lockstep change,
+never client-only; inner-frame evolution (new payload types / type_versions)
+needs no relay change (`envelope.md` §Versioning and relay coordination).
+Reference: `tezca-relay/src/wire.rs` `deposit_admissible`;
+`tezca-relay/tests/limits.rs` `deposit_negatives`.
 
 ### `GET /v1/mailboxes/{id}/ws`
 WebSocket subscribe for delivery.
@@ -44,7 +52,8 @@ WebSocket subscribe for delivery.
 - `429` (+ `Retry-After`): per-mailbox WS-connect rate
 
 A second subscriber to the same mailbox replaces the first (the older
-connection closes) — device-restart semantics.
+connection closes) — device-restart semantics. Delivery/ack frames carry no
+version byte; their evolution hook is the `/v1/` URL prefix (Horizon §H4.2).
 
 Frames (binary):
 - server → client delivery: `0x01 || message_id(16) || envelope`
@@ -88,6 +97,16 @@ response, no oracle).
 ### `GET /healthz`
 Liveness. `200 OK`, body `ok`. No state, no auth.
 
+### Reserved: admission credential (Horizon §H6.3)
+An optional, opaque admission-credential field on relay operations (connect /
+create / deposit) is **reserved** for org-scoped relays. At spec 1.0 it is
+undefined on the wire: no endpoint above carries it, this relay reads no such
+field, and the public relay never requires it. When specified, it is additive
+and default-absent, carried per the conventions above (header or body field);
+a spec-1.0 client remains valid against any relay that does not require it.
+Reference: `tezca-relay/src/api.rs` handler signatures (connection address,
+path id, body only); `envelope.md` §Versioning and relay coordination.
+
 ## Invariants realized here
 
 - **INV-2 (blind):** no endpoint reads beyond the envelope magic+version;
@@ -120,8 +139,21 @@ Liveness. `200 OK`, body `ok`. No state, no auth.
 | `--rate-deposit-per-min-mailbox` | 120 | per-mailbox deposits |
 | `--rate-ws-per-min-mailbox` | 6 | per-mailbox WS connects |
 
-## Open items (post-MVP)
+## Conformance
 
-- Mailbox re-exchange after relay restart when both directions die at once
-  (work order §10.7, a Phase 4 client design item).
-- TLS certificate hot-reload (MVP rotates via process restart).
+Relay behavior is pinned by `tezca-relay/tests/` (`limits.rs` — admission
+negatives, capacities, TTL; `put_mailbox.rs` — idempotent create-at-id and
+the uniform cap response; `zero_knowledge.rs` — indistinguishable 404s,
+unconditional DELETE, payload-type-blind treatment; `relay_lifecycle.rs` —
+replay/redelivery across restart) and the admission fuzz target
+`tezca-relay/fuzz/fuzz_targets/deposit_admissible.rs`. The client-side
+protocol that rides this API is specified in `envelope.md`, `pairing.md`,
+`inner-frame.md`, and `recovery.md`.
+
+## Resolved and open items
+
+- Mailbox re-exchange after relay restart when both directions die at once —
+  **RESOLVED** (Phase 4b-2): `PUT /v1/mailboxes/{id}` above plus the
+  client-side derived-mailbox recovery protocol, `proto/recovery.md`.
+- TLS certificate hot-reload (MVP rotates via process restart) — open,
+  post-MVP; not a wire matter.

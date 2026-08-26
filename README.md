@@ -10,14 +10,21 @@ logging identities. GrapheneOS first, standard Android second.
 Titlan is the first module of a broader security platform, published by
 Oculux Technologies LLC.
 
-**Status: Phase 2 — core protocol implemented.** Envelope, PQXDH sessions
-(libsignal), and encrypted storage are in place with full test coverage; the
-relay server and Android UI are still to come.
+**Status: Phase 5 — pre-publish hardening.** The core protocol, relay
+server, and Android pairing/sync surfaces are implemented; the wire protocol
+is frozen (spec 1.0, below); the conversation/messaging UI is still to come.
 
-> **Protocol status: NOT frozen.** The wire protocol and pairing formats are
-> not frozen until the Phase 5 protocol specification is published. Do not
-> build compatible clients against `main` yet — formats may change without
-> notice until then.
+> **Protocol status: FROZEN — Titlan wire protocol spec 1.0** (Phase 5,
+> unit 5a-3). The wire formats under [`proto/`](proto/) — outer envelope v1,
+> the inner-frame payload-type registry, pairing bundle v1, pair-offer v3,
+> the control frames, and the relay API `/v1/` — are frozen and third-party
+> implementable; start at [`proto/envelope.md`](proto/envelope.md), which
+> indexes the companion documents and the committed conformance vectors
+> (`proto/fixtures/`). **Compatibility promise:** frozen formats change only
+> by a version bump or a registry-controlled addition, never by in-place
+> redefinition; a spec-1.0 receiver accepts exactly the frozen versions and
+> rejects every other cleanly. Every normative statement in `proto/` is
+> backed by the reference implementation and its committed tests.
 
 Titlan is built with an AI-assisted, human-gated development process — see
 [DEVELOPMENT.md](DEVELOPMENT.md) for exactly how, and why we publish that.
