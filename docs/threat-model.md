@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
 
 # Titlan Threat Model
@@ -1044,9 +1044,9 @@ confirmed critical issues within 30).
 ## 8. RESIDUAL / ACCEPTED register
 
 Every entry above marked RESIDUAL or ACCEPTED, with its ratifying record.
-Entries whose record column reads **none — needs maintainer words** have no
-ratified acceptance text at spec 1.0; they are carried here so the
-maintainer can ratify, reject, or assign them at grading.
+Five rows (TM-R5, TM-R7, TM-R8, TM-X3, TM-X4) had no ratified acceptance
+text at spec 1.0 and were ratified at this document's grading,
+2026-08-27 — governance ledger item 29.
 
 | ID | surface | verdict | what is accepted / residual | ratifying record |
 |---|---|---|---|---|
@@ -1061,11 +1061,11 @@ maintainer can ratify, reject, or assign them at grading.
 | TM-R2 | relay | ACCEPTED | metadata exposure to the relay/network: mailbox ids, deposit/delivery timing and their correlation, bucketed sizes (≈ 1.6-bit length channel), source IPs, presence, identity public key in session-setup blobs; no cover traffic, jitter, mixing, or anonymity-network integration | A6; A8 + `proto/envelope.md §Padding buckets and profiles`; `proto/pairing.md §Privacy note` ("Accepted for MVP"); plan of record "sealed-sender metadata bounds" (ledger item 22) |
 | TM-R3 | relay | RESIDUAL | deployment-dependent: `mlockall` best-effort, silent on `EPERM`; without the shipped unit's memlock grant / `MemorySwapMax=0`, mailbox memory may swap | `proto/relay-api.md §Invariants realized here`; `deploy/tezca-relay.service` |
 | TM-R4 | relay | ACCEPTED | restart loses deposited-but-unfetched blobs silently (no e2e receipt at 1.0); re-pair-only cases: total loss before the handoff lands; root-less conversations; recovery blocked at the global cap | INV-3; `proto/inner-frame.md §Derived recovery-mailbox IDs` (frozen §8); `proto/recovery.md §6. Conversations without a recovery root`; `proto/relay-api.md §PUT /v1/mailboxes/{id}`; 4b-2 freeze §8 |
-| TM-R5 | relay | RESIDUAL | volumetric / transport-layer DoS has no in-protocol defense (deployment concern) | **none — needs maintainer words** |
+| TM-R5 | relay | RESIDUAL | volumetric / transport-layer DoS has no in-protocol defense (deployment concern) | maintainer ratification 2026-08-27 ("Ratify all five, assignments as recommended") — governance ledger item 29 |
 | TM-R5 | relay | ACCEPTED | IP-keyed limiter shape: NAT populations share budgets; multi-address adversaries multiply theirs; a distributed adversary can fill the global mailbox cap (uniform `503`) | work order §10.2 relay-defaults resolution (2026-07-14, "All config; defaults only"); `proto/relay-api.md §PUT /v1/mailboxes/{id}` (recovery-blocked-at-cap) |
 | TM-R6 | relay | ACCEPTED | certificate-pinning posture: designed in core (per-conversation `relay_pin`), not reachable from FFI/UI; release builds run on platform trust roots; SPKI pinning not built; relay cert rotation by restart only | work order §6 Phase 4 ("optional-but-designed"); plan of record "certificate-pinning posture" (ledger item 22); ledger item 24 (5d-2 row); `proto/relay-api.md §Resolved and open items` |
-| TM-R7 | relay | RESIDUAL | a malicious relay can drop, delay, withhold, or ack-delete traffic undetectably (availability); no receipt, no second path, no attestation | **none — needs maintainer words** (the trust model states honest-but-curious reliance for availability) |
-| TM-R8 | relay | RESIDUAL | post-compromise: mailbox ids learned on the host stay valid until pairing/recovery rotation; no suspected-compromise rotation trigger; unit directives beyond the content-asserted six are syntax-verified only | **none — needs maintainer words** |
+| TM-R7 | relay | RESIDUAL | a malicious relay can drop, delay, withhold, or ack-delete traffic undetectably (availability); no receipt, no second path, no attestation | maintainer ratification 2026-08-27 ("Ratify all five, assignments as recommended") — governance ledger item 29 (the trust model states honest-but-curious reliance for availability) |
+| TM-R8 | relay | RESIDUAL | post-compromise: mailbox ids learned on the host stay valid until pairing/recovery rotation; no suspected-compromise rotation trigger; unit directives beyond the content-asserted six are syntax-verified only | maintainer ratification 2026-08-27 ("Ratify all five, assignments as recommended") — governance ledger item 29 |
 | TM-P1 | pairing | ACCEPTED | complete-offer compromise: a holder of the entire offer can pair as the responder within the window; not an MITM defense | `proto/pairing.md §Ledgered risks`; v3 freeze §3; 4b-2 freeze §3, §10 |
 | TM-P2 | pairing | ACCEPTED | scheme squatting: the app registers no `titlan://` handler; any app claiming the scheme receives tapped links; link path documented as weaker, QR recommended | `proto/pairing.md §Ledgered risks`; 4b-2 freeze §3, §10 |
 | TM-P2 | pairing | ACCEPTED | `https://` fragment in browser history (App Links, not yet landed); a static landing page must never read the fragment; v3 bounds it in time | `proto/pairing.md §Ledgered risks`; 4b-2 freeze §4 |
@@ -1078,9 +1078,10 @@ maintainer can ratify, reject, or assign them at grading.
 | TM-P11 | pairing | ACCEPTED | offerer-side pairing-mailbox delete at expiry is SHOULD/best-effort; a stale pairing mailbox may persist ≤ 14 d as a useless deposit target | Horizon §H7.3; `proto/pairing.md §Relay TTL is a storage bound` |
 | TM-X1 | cross | RESIDUAL | enumerative primitive deny-list (unlisted primitive crates rely on documented review); release APK unsigned in CI, artifact trust rests on the external signing procedure | ledger item 24 (5b-2 matrix INV-6 boundary note); Phase 5 plan of record (5d-2 scope) |
 | TM-X2 | cross | ACCEPTED | lockstep transition: clients and relays across a future outer-version bump cannot interoperate during rollout | Horizon §H4.2 |
-| TM-X3 | cross | ACCEPTED | advisory watch is reactive with no SLA on publication-to-bump interval | **none — needs maintainer words** |
-| TM-X4 | cross | RESIDUAL | third-party GitHub Actions referenced by mutable major tags, not commit SHAs | **none — needs maintainer words** |
+| TM-X3 | cross | ACCEPTED | advisory watch is reactive with no SLA on publication-to-bump interval | maintainer ratification 2026-08-27 ("Ratify all five, assignments as recommended") — governance ledger item 29 |
+| TM-X4 | cross | RESIDUAL | third-party GitHub Actions referenced by mutable major tags, not commit SHAs | maintainer ratification 2026-08-27 ("Ratify all five, assignments as recommended") — governance ledger item 29 |
 
-Entries with a record are re-ratified by the maintainer at this document's
-grading; entries marked **none — needs maintainer words** are the open
-items of this threat model at spec 1.0.
+Entries with a record were re-ratified by the maintainer at this
+document's grading, 2026-08-27; the five entries that had no record
+at spec 1.0 (TM-R5, TM-R7, TM-R8, TM-X3, TM-X4) were ratified there
+— governance ledger item 29.
