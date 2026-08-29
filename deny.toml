@@ -149,16 +149,6 @@ skip = [
     # libcrux-secrets 0.0.6's cfg(valgrind_ct_test) path (never compiled
     # here; SBOM/scanning surface only).
     # ----------------------------------------------------------------------
-    # The six entries below are the old-generation RustCrypto chain held by
-    # aes-gcm-siv 0.11.1 inside libsignal's tree (libsignal's own
-    # RustCrypto-stack half-migration). Converge when libsignal drops
-    # aes-gcm-siv / completes its RustCrypto migration:
-    { name = "aes", version = "=0.8.4" },
-    { name = "cipher", version = "=0.4.4" },
-    { name = "ctr", version = "=0.9.2" },
-    { name = "inout", version = "=0.1.4" },
-    { name = "polyval", version = "=0.6.2" },
-    { name = "universal-hash", version = "=0.5.1" },
     # itertools 0.13 via bindgen ← crabgrind (the never-compiled valgrind
     # path above); libsignal's direct itertools is 0.15. Converges when
     # that path leaves the lockfile or bindgen catches up:
