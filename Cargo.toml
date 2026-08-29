@@ -18,7 +18,7 @@ rust-version = "1.97"
 # cryptographic primitives. Git-only upstream (not on crates.io); pinned tag,
 # exact rev sealed in Cargo.lock. deny.toml enforces the primitive-crate ban
 # outside libsignal's dependency tree.
-libsignal-protocol = { version = "0.1.0", git = "https://github.com/signalapp/libsignal", tag = "v0.99.1" }
+libsignal-protocol = { version = "0.1.0", git = "https://github.com/signalapp/libsignal", tag = "v0.101.1" }
 # A4: SQLCipher at-rest encryption (locked decision; vendored OpenSSL for
 # self-contained Android cross-builds later).
 rusqlite = { version = "0.40.1", features = ["bundled-sqlcipher-vendored-openssl"] }
@@ -66,18 +66,12 @@ uniffi = "0.32"
 # INV-6-sanctioned home of HMAC-SHA256 (CryptographicMac). Used for the
 # pair-ack/2 proof-of-scan and the §8 derived-mailbox HMAC-PRF. deny.toml
 # already lists signal-crypto as the legitimate hmac/sha2 wrapper.
-signal-crypto = { version = "0.1.0", git = "https://github.com/signalapp/libsignal", tag = "v0.99.1" }
+signal-crypto = { version = "0.1.0", git = "https://github.com/signalapp/libsignal", tag = "v0.101.1" }
 # 4b-2 green (maintainer-ratified 2026-07-19, F-dep-2): constant-time equality
 # for the proof-of-scan compare. Pinned to the in-tree transitive version
 # (lockstep-adjacent; already present via curve25519-dalek). Not a primitive
 # cipher/hash — outside the INV-6 ban; ledger-noted in deny.toml.
 subtle = { version = "2.6.1", default-features = false }
-
-# Mirrors upstream's [patch.crates-io] declaration verbatim. UNUSED
-# since v0.99.1 (build graph carries registry curve25519-dalek 5.0 via
-# libsignal-core) — prune when upstream drops it.
-[patch.crates-io]
-curve25519-dalek = { git = "https://github.com/signalapp/curve25519-dalek", tag = "signal-curve25519-4.1.3" }
 
 # Phase 5: zero unsafe achieved and forbidden in-source (5b-1 census,
 # 2026-08-05). Workspace deny retained as backstop; introducing unsafe now

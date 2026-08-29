@@ -32,14 +32,21 @@ updates:
       # both entries; 0.9.x patches still flow.
       - dependency-name: "rand"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      # libsignal bumps are maintainer-initiated, never automated: they move
-      # in lockstep with rand (see above / work-order §10.2), must be
-      # verified against the RNG trait bounds in identity/session key
-      # generation, and require re-mirroring libsignal's [patch.crates-io]
-      # table in our Cargo.toml — none of which a Dependabot PR performs.
+      # libsignal bumps are maintainer-initiated, never automated, for BOTH
+      # crates that share the libsignal git tag — libsignal-protocol and
+      # signal-crypto; a lone move of either splits the tree, as Dependabot
+      # PR #39 proposed (2026-08-17). They move in lockstep with rand (see
+      # above / work-order §10.2), must be verified against the RNG trait
+      # bounds in identity/session key generation, and require mirroring
+      # any libsignal [patch.crates-io] entry that patches a crate in OUR
+      # graph (none at v0.101.1; upstream's remaining patch is boring, which
+      # we do not consume) — none of which a Dependabot PR performs.
       # Security advisories still surface via the cargo deny/audit CI job
-      # (INV-6/INV-7). Maintainer decision 2026-07-16 (PR #16 closure).
+      # (INV-6/INV-7). Maintainer decision 2026-07-16 (PR #16 closure);
+      # signal-crypto entry added at the v0.101.1 lockstep bump (5c-1
+      # investigation O-3/O-10, maintainer-ratified 2026-08-27).
       - dependency-name: "libsignal-protocol"
+      - dependency-name: "signal-crypto"
 
   - package-ecosystem: gradle
     directory: /titlan-android

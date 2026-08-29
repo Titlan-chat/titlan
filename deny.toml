@@ -97,14 +97,12 @@ multiple-versions = "deny"
 # skip-tree, so any FUTURE duplicate — even under an already-skipped parent —
 # fails CI and gets its own deliberate entry here.
 skip = [
-    # §10.2 LOCKSTEP — DO NOT DEDUP INDEPENDENTLY: libsignal's RustCrypto
-    # trait chain (crypto-common/aead) is still on rand_core 0.6. This dupe
-    # exists BECAUSE of the coupled-dependency rule; converging it means
-    # bumping libsignal's side, which moves only with a libsignal bump
-    # verified against the RNG trait bounds (§10.2 ledger).
-    { name = "rand_core", version = "=0.6.4" },
-    # §10.2 LOCKSTEP — DO NOT DEDUP INDEPENDENTLY: rand_core 0.6.4's
-    # OS-entropy backend, pinned by the same libsignal chain as above.
+    # getrandom 0.2 is held by ring 0.17 alone (the workspace TLS provider's
+    # entropy backend; cargo tree -i getrandom@0.2). Not libsignal-coupled:
+    # libsignal's tree is on getrandom 0.3 (rand_core 0.9) and 0.4 (rand
+    # 0.10); its former rand_core 0.6 partner converged at the v0.101.1
+    # lockstep bump (5c-1, 2026-08-29). Converges when ring moves to
+    # getrandom 0.3+.
     { name = "getrandom", version = "=0.2.17" },
     # tungstenite 0.30's internal masking/handshake RNG chain (rand 0.10 →
     # rand_core 0.10 → getrandom 0.4), pinned entry per link. Shares NO
@@ -125,17 +123,25 @@ skip = [
     # rusqlite 0.40's wasm VFS chain (sqlite-wasm-rs, non-Android target)
     # trails the workspace hashbrown 0.17.
     { name = "hashbrown", version = "=0.16.1" },
-    # tungstenite 0.30 moved to sha1 0.11; axum's WS stack and libsignal's
-    # signal-crypto remain on 0.10 (both remain INV-6 wrapper-listed above).
-    # sha1 0.11 drags the RustCrypto 0.11-generation base traits alongside
-    # libsignal's 0.10 generation — one pinned entry per link (previously
-    # absorbed silently by the skip-tree this ledger replaced):
+    # sha1 0.11 is the current generation for both tungstenite 0.30 and
+    # libsignal's signal-crypto (RustCrypto 0.11 base traits: digest 0.11,
+    # block-buffer 0.12, crypto-common 0.2 — the same generation libsignal's
+    # sha2/hmac/curve25519-dalek use). The 0.10 side is the relay's
+    # server-side WS stack only: sha1 0.10.7 <- axum 0.8.9 + tungstenite
+    # 0.29.0, dragging digest 0.10 / block-buffer 0.10 / crypto-common 0.1
+    # (all INV-6 wrapper-listed above). One pinned entry per link; refreshed
+    # at the v0.101.1 lockstep bump (5c-1, 2026-08-29); converges when axum's
+    # WS stack moves to sha1 0.11:
     { name = "sha1", version = "=0.11.0" },
     { name = "digest", version = "=0.11.3" },
     { name = "block-buffer", version = "=0.12.1" },
     { name = "crypto-common", version = "=0.2.2" },
-    # rand 0.10's chacha core (chacha20 0.10) pulls cpufeatures 0.3;
-    # libsignal's stack is on 0.2.
+    # cpufeatures 0.3 is the libsignal-tree generation (aes 0.9, sha2 0.11,
+    # curve25519-dalek 5, polyval 0.7, spqr, sha1 0.11, and rand 0.10's
+    # chacha20 core); the remaining 0.2.17 is held only by the axum-side
+    # sha1 0.10 chain (sha1 0.10.7 <- axum 0.8 / tungstenite 0.29). Refreshed
+    # at the v0.101.1 lockstep bump (5c-1, 2026-08-29); converges when axum's
+    # WS stack moves to sha1 0.11.
     { name = "cpufeatures", version = "=0.3.0" },
     # Non-Linux transitive splits (Windows / UEFI targets in the lockfile).
     { name = "windows-sys", version = "=0.52.0" },
