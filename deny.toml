@@ -190,7 +190,7 @@ allow-wildcard-paths = true
 # with an approval note in the PR.
 # ---------------------------------------------------------------------------
 deny = [
-    { name = "aes", wrappers = ["aes-gcm-siv", "cbc", "ctr", "libsignal-protocol", "signal-crypto"] },
+    { name = "aes", wrappers = ["aes-gcm-siv", "libsignal-protocol", "signal-crypto"] },
     { name = "aes-gcm", wrappers = [] },
     { name = "aes-gcm-siv", wrappers = ["libsignal-protocol"] },
     { name = "ctr", wrappers = ["aes-gcm-siv", "libsignal-protocol", "signal-crypto"] },
@@ -209,13 +209,13 @@ deny = [
         "tungstenite",   # test WS client; also sha1's direct parent under axum's tokio-tungstenite
         "signal-crypto", # libsignal-internal (audited tree), NOT WebSocket
     ] },
-    { name = "sha2", wrappers = ["curve25519-dalek", "hkdf", "hmac", "libsignal-core", "libsignal-protocol", "signal-crypto", "spqr"] },
-    { name = "md-5", wrappers = ["hmac", "uuid"] },
-    { name = "hmac", wrappers = ["hkdf", "libsignal-protocol", "signal-crypto", "spqr"] },
+    { name = "sha2", wrappers = ["libsignal-core", "libsignal-protocol", "signal-crypto", "spqr"] },
+    { name = "md-5", wrappers = [] },
+    { name = "hmac", wrappers = ["hkdf", "libsignal-protocol", "signal-crypto"] },
     { name = "hkdf", wrappers = ["libsignal-protocol", "signal-crypto", "spqr"] },
     { name = "pbkdf2", wrappers = [] },
     { name = "argon2", wrappers = [] },
-    { name = "curve25519-dalek", wrappers = ["libsignal-core", "libsignal-protocol", "spqr", "x25519-dalek"] },
+    { name = "curve25519-dalek", wrappers = ["libsignal-core", "spqr", "x25519-dalek"] },
     { name = "x25519-dalek", wrappers = ["libsignal-core"] },
     { name = "ed25519-dalek", wrappers = [] },
     { name = "rsa", wrappers = [] },
@@ -255,6 +255,8 @@ unknown-git = "deny"
 
 [sources.allow-org]
 # The libsignal tree is git-only (pinned tags, revs sealed in Cargo.lock):
-# signalapp/libsignal, signalapp/curve25519-dalek (their audited dalek fork,
-# mirrored in [patch.crates-io]), signalapp/SparsePostQuantumRatchet.
+# signalapp/libsignal and signalapp/SparsePostQuantumRatchet. (The
+# signalapp/curve25519-dalek fork and its [patch.crates-io] mirror were
+# pruned at the v0.101.1 bump — crates.io curve25519-dalek serves the tree
+# since; the allow-org stays for the two git deps above.)
 github = ["signalapp"]
