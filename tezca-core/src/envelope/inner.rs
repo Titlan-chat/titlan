@@ -36,7 +36,7 @@ pub enum PayloadType {
     Policy = 0x03,
     /// Appliance alert (Tezca suite; reserved, first-class).
     Alert = 0x04,
-    /// Pairing control: scanner's reply coordinates (`pair-ack/1`, `pair-ack/2`).
+    /// Pairing control: scanner's reply coordinates (`pair-ack/2`).
     PairAck = 0x05,
     /// Pairing/recovery control: inbox rotation / handoff (`mailbox-update/1`,
     /// `mailbox-update/2` inbox-handoff, `mailbox-update/3` rotation).

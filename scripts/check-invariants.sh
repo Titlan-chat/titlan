@@ -512,10 +512,21 @@ done
 # --- 13. Relay unit hardening directives (INV-3) ------------------------------
 # The relay-hardening CI job's `systemd-analyze verify` checks only that the
 # unit is WELL-FORMED — deleting a hardening directive would still verify.
-# Content-assert each INV-3 line verbatim (G2.i ratified 2026-08-10).
+# Content-assert each INV-3 line verbatim (G2.i ratified 2026-08-10). TM-R8
+# (5c-1, ratified 2026-08-27) extends this to EVERY hardening directive in the
+# unit — all eighteen, exact values — so silent weakening of any directive
+# fails here even though `systemd-analyze verify` would still pass.
 relay_unit=deploy/tezca-relay.service
 for directive in 'MemorySwapMax=0' 'LimitCORE=0' 'LimitMEMLOCK=infinity' \
-                 'ProtectSystem=strict' 'ReadOnlyPaths=/' 'PrivateTmp=yes'; do
+                 'ProtectSystem=strict' 'ReadOnlyPaths=/' 'PrivateTmp=yes' \
+                 'DynamicUser=yes' 'ProtectHome=yes' 'NoNewPrivileges=yes' \
+                 'ProtectKernelTunables=yes' 'ProtectKernelModules=yes' \
+                 'ProtectControlGroups=yes' \
+                 'RestrictAddressFamilies=AF_INET AF_INET6' \
+                 'RestrictNamespaces=yes' 'LockPersonality=yes' \
+                 'MemoryDenyWriteExecute=yes' \
+                 'SystemCallFilter=@system-service' \
+                 'SystemCallArchitectures=native'; do
   if ! grep -qxF "$directive" "$relay_unit"; then
     echo "INV-3 violation: hardening directive '$directive' missing from $relay_unit"
     fail=1

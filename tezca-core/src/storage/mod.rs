@@ -381,7 +381,7 @@ impl Store {
     }
 
     /// Updates where to send for a conversation (peer's relay + inbox), learned
-    /// from a `pair-ack/1` or `mailbox-update/1`.
+    /// from a `pair-ack/2` or `mailbox-update/1`.
     ///
     /// # Errors
     ///
