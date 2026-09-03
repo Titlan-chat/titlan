@@ -1,0 +1,49 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Titlan</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Titlan</h1>
+    <p class="lead">An end-to-end encrypted messenger for Android. No phone numbers, no accounts, and a relay that cannot read what it carries.</p>
+    <nav>
+      <a href="verify.html">Verify a download</a>
+      <a href="https://github.com/Titlan-chat/titlan/releases">Releases</a>
+      <a href="https://github.com/Titlan-chat/titlan">Source</a>
+    </nav>
+  </header>
+  <main>
+    <h2>What Titlan is</h2>
+    <p><strong>End-to-end encrypted.</strong> Every message is encrypted on your device with the Signal protocol stack (libsignal) and decrypted only on your contact's device. Message content is never on the wire in the clear and never at the relay.</p>
+    <p><strong>No phone numbers, no accounts, no directory.</strong> Your identity is a keypair generated on your device. You connect with someone by pairing: scanning a QR code in person, or exchanging a pairing link. There is no server-side identity to register, look up, or leak. The link path is documented as the weaker of the two; QR is recommended.</p>
+    <p><strong>A blind relay.</strong> Messages travel through a relay that is a stateless, RAM-only mailbox store. It holds no database, writes nothing to disk, keeps no logs, and carries no identity: it stores and delivers opaque blobs addressed by mailbox id. Anyone can run one; a self-hosted relay is a first-class deployment.</p>
+    <p><strong>Metadata is minimized, not eliminated.</strong> There is no cleartext sender, recipient, or message-type field on the wire, and messages are padded to fixed size classes before encryption. What the relay and the network still observe (timing, source addresses, message-size classes) is stated plainly in the <a href="https://github.com/Titlan-chat/titlan/blob/main/docs/threat-model.md">threat model</a>. Titlan does not provide anonymity at the network layer.</p>
+    <p><strong>Trust on first use.</strong> A contact's key is recorded when you pair and trusted from then on. Spec 1.0 has no safety numbers and no key-change notification; verifying a contact's key happens out of band.</p>
+    <p><strong>GrapheneOS first, standard Android second.</strong> Titlan targets GrapheneOS first and runs on standard Android. It is Android only.</p>
+    <p><strong>Open source, verifiable builds.</strong> The protocol core and the wire specification are Apache-2.0; the app and the relay are AGPL-3.0. Builds are reproducible from pinned toolchains and locked dependencies, and every tagged build ships with software bills of materials and a build provenance attestation. The wire protocol is frozen at spec 1.0 and is third-party implementable.</p>
+    <h2>What Titlan does not do</h2>
+    <ul>
+      <li>No group conversations: spec 1.0 is pairwise only.</li>
+      <li>No attachments: they are out of scope for spec 1.0 and will never transit the relay.</li>
+      <li>One device per identity: there is no multi-device.</li>
+      <li>No in-app key verification (safety numbers) and no key-change alerts.</li>
+      <li>No per-message notifications at spec 1.0: messages appear when you open the app.</li>
+    </ul>
+    <h2>Status</h2>
+    <p>Titlan is pre-release. The protocol core, the relay, and the Android pairing and sync layers are implemented, and the wire protocol is frozen at spec 1.0; the conversation screens are still being built. There are no supported releases yet. Official releases appear on <a href="https://github.com/Titlan-chat/titlan/releases">GitHub Releases</a> together with their proofs; see <a href="verify.html">how to verify a download</a>.</p>
+    <h2>Security</h2>
+    <p>Report a vulnerability privately to security@titlan.chat, or through GitHub private vulnerability reporting. Scope and response times are in <a href="https://github.com/Titlan-chat/titlan/blob/main/SECURITY.md">SECURITY.md</a>. No custom cryptography exists in the codebase by policy: primitives come from libsignal and mainstream audited TLS crates.</p>
+    <p class="note">This site is static: no scripts, no cookies, no third-party requests.</p>
+  </main>
+  <footer>
+    <p>© 2026 Oculux Technologies LLC</p>
+  </footer>
+</body>
+</html>

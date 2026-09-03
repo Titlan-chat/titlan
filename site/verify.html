@@ -1,0 +1,59 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Verify a Titlan download</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Verify a Titlan download</h1>
+    <p class="lead">Three checks: the signing certificate, the release artifact hash, and the reproducible build.</p>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="https://github.com/Titlan-chat/titlan/releases">Releases</a>
+      <a href="https://github.com/Titlan-chat/titlan">Source</a>
+    </nav>
+  </header>
+  <main>
+    <h2>1. The signing certificate</h2>
+    <p>Every official Titlan release is signed with one release certificate. This certificate does not rotate: a Titlan APK signed by any other certificate is not an official release. Its SHA-256 fingerprint, as the two common tools print it:</p>
+    <p>As <code>keytool</code> prints it:</p>
+    <pre class="fingerprint">EC:DD:E6:C1:76:29:D7:44:7C:62:17:13:7B:27:B0:AF:9F:91:5D:C6:C5:CA:CF:8C:38:FF:02:D0:B2:2C:8A:E0</pre>
+    <p>As <code>apksigner --print-certs</code> prints it:</p>
+    <pre class="fingerprint">ecdde6c17629d7447c6217137b27b0af9f915dc6c5cacf8c38ff02d0b22c8ae0</pre>
+    <p>Check the APK you downloaded (called <code>titlan.apk</code> below) with either tool. <code>apksigner</code> ships with the Android SDK build tools; <code>keytool</code> ships with the JDK.</p>
+    <pre>apksigner verify --print-certs titlan.apk</pre>
+    <pre>keytool -printcert -jarfile titlan.apk</pre>
+    <p>Compare the certificate SHA-256 digest that the command prints with the value above. If it differs, the file was not signed with the Titlan release certificate: do not install it.</p>
+    <h2>2. Release artifacts</h2>
+    <p>Titlan downloads are published only on <a href="https://github.com/Titlan-chat/titlan/releases">GitHub Releases</a>. Each release entry publishes the signed APK together with its SHA-256, beside the CycloneDX software bills of materials (protocol core, relay, and the app's dependency closure), the reproducibility report, and the build provenance attestation, so the download and its proof sit side by side.</p>
+    <p>Compute the hash of the file you downloaded and compare it with the SHA-256 on that release's entry:</p>
+    <pre>sha256sum titlan.apk</pre>
+    <p>This page does not repeat per-release hashes; the release entry is the authoritative place for them.</p>
+    <h2>3. Reproducible builds</h2>
+    <p>The repository's <a href="https://github.com/Titlan-chat/titlan/blob/main/scripts/repro-build.sh">reproducible-build script</a> is what CI runs on every push and in every tagged build. What it does:</p>
+    <ul>
+      <li>It builds the release artifacts twice, each time from a fresh copy of the source tree placed at a fixed canonical path: the relay's release binary (Cargo with locked dependencies and embedded path prefixes remapped) and the unsigned release APK (Gradle with locked dependencies).</li>
+      <li>It pins the build timestamp to the commit's own time, so both passes see the same value.</li>
+      <li>It compares the SHA-256 of each artifact across the two passes and fails if any differ. On an APK mismatch it lists the differing archive entries.</li>
+      <li>It writes a report naming the toolchain versions and both hashes of each artifact.</li>
+    </ul>
+    <p>Hashes are comparable across machines only when built from the same canonical path with the same pinned toolchains; the repository's build documentation lists the pins. CI builds are unsigned by design: signing happens offline, outside the repository and CI, and the signed APK's SHA-256 is published with the release.</p>
+    <p>To reproduce a release yourself, check out the tagged commit, install the pinned toolchains, and run the script. Its report can then be compared with the reproducibility report published for that release.</p>
+    <h2>Further reading</h2>
+    <ul>
+      <li><a href="https://github.com/Titlan-chat/titlan/blob/main/proto/envelope.md">Wire protocol specification 1.0</a> (frozen; third-party implementable)</li>
+      <li><a href="https://github.com/Titlan-chat/titlan/blob/main/docs/threat-model.md">Threat model 1.0</a> (what is mitigated, what is residual, what is accepted)</li>
+      <li><a href="https://github.com/Titlan-chat/titlan/blob/main/SECURITY.md">SECURITY.md</a> (how to report a vulnerability)</li>
+    </ul>
+  </main>
+  <footer>
+    <p><a href="index.html">Titlan home</a></p>
+  </footer>
+</body>
+</html>

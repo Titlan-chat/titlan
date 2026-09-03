@@ -32,9 +32,11 @@ spdx_missing=0
 while IFS= read -r f; do
   case "$f" in
     LICENSE*|*/LICENSE|Cargo.lock|*/gradle.lockfile|*gradle/wrapper/*|*/gradlew|*/gradlew.bat) continue ;;
+    # Cloudflare Pages config; comment support unspecified upstream
+    site/_headers) continue ;;
   esac
   case "$f" in
-    *.rs|*.kt|*.kts|*.sh|*.toml|*.yml|*.yaml|*.xml|*.md|*.properties|.gitignore|.editorconfig)
+    *.rs|*.kt|*.kts|*.sh|*.toml|*.yml|*.yaml|*.xml|*.md|*.properties|*.html|*.css|.gitignore|.editorconfig)
       if ! head -5 "$f" | grep -q 'SPDX-License-Identifier:'; then
         echo "MISSING SPDX header: $f"
         spdx_missing=1
@@ -596,9 +598,94 @@ if [ -n "$kt_scope" ]; then
   fi
 fi
 
+# --- 15. Site invariants (5d D6) ---------------------------------------------
+# The public site (site/, served by Cloudflare Pages) is frozen at the 5d D6
+# gate (docs/design/p5d-release-freeze.md §D6, §Sequencing): five fixed files;
+# static and self-contained (no scripts, frames, images, objects, embeds,
+# javascript: URLs, CSS imports, or url() fetches); the verification page
+# carries the D4 release-signing certificate SHA-256 exactly once in each of
+# its two printed forms; A11 branding (Titlan-only — the publisher name only
+# on SPDX lines and in the single imprint literal); the five required links;
+# and no placeholder text (§Sequencing 2: a section ships only when its
+# literal exists). 15a runs unconditionally; 15b–15f run once site/ exists,
+# so an absent site/ fails on 15a's five lines and nothing else.
+site_files='site/index.html site/verify.html site/style.css site/_headers site/404.html'
+# 15a. Existence.
+for f in $site_files; do
+  if [ ! -f "$f" ]; then
+    echo "MISSING site file: $f"
+    fail=1
+  fi
+done
+if [ -d site ]; then
+  # 15b. No active or external content.
+  site_active_hits=$(grep -rniE '<script|<iframe|<img|<object|<embed|javascript:|@import|url\(' site || true)
+  if [ -n "$site_active_hits" ]; then
+    echo "site: active/external content under site/ (D6: static, script-free, self-contained):"
+    echo "$site_active_hits"
+    fail=1
+  fi
+  # 15c. D4 certificate fingerprint pins — each printed form exactly once, in
+  #      site/verify.html only (keytool colon form; apksigner lowercase hex).
+  d4_fp_colon='EC:DD:E6:C1:76:29:D7:44:7C:62:17:13:7B:27:B0:AF:9F:91:5D:C6:C5:CA:CF:8C:38:FF:02:D0:B2:2C:8A:E0'
+  d4_fp_hex='ecdde6c17629d7447c6217137b27b0af9f915dc6c5cacf8c38ff02d0b22c8ae0'
+  if [ -f site/verify.html ]; then
+    d4_colon_n=$(grep -cF "$d4_fp_colon" site/verify.html || true)
+    d4_hex_n=$(grep -cF "$d4_fp_hex" site/verify.html || true)
+    if [ "$d4_colon_n" -ne 1 ]; then
+      echo "site: D4 certificate SHA-256 (colon form) must appear exactly once in site/verify.html (found $d4_colon_n)"
+      fail=1
+    fi
+    if [ "$d4_hex_n" -ne 1 ]; then
+      echo "site: D4 certificate SHA-256 (hex form) must appear exactly once in site/verify.html (found $d4_hex_n)"
+      fail=1
+    fi
+  fi
+  # 15d. A11 branding: no platform brand string anywhere under site/; the
+  #      publisher name only on SPDX copyright lines and inside the imprint
+  #      literal, which itself appears exactly once across site/*.html.
+  site_tezca_hits=$(grep -rni 'tezca' site || true)
+  if [ -n "$site_tezca_hits" ]; then
+    echo "A11 violation: reserved platform brand string under site/:"
+    echo "$site_tezca_hits"
+    fail=1
+  fi
+  site_imprint='© 2026 Oculux Technologies LLC'
+  site_oculux_hits=$(grep -rni 'oculux' site | grep -v 'SPDX-FileCopyrightText' \
+    | sed "s/$site_imprint//g" | grep -i 'oculux' || true)
+  if [ -n "$site_oculux_hits" ]; then
+    echo "A11 violation: publisher name under site/ outside SPDX lines and the imprint literal:"
+    echo "$site_oculux_hits"
+    fail=1
+  fi
+  site_imprint_n=$(cat site/*.html 2>/dev/null | grep -oF "$site_imprint" | grep -c . || true)
+  if [ "$site_imprint_n" -ne 1 ]; then
+    echo "site: imprint '$site_imprint' must appear exactly once across site/*.html (found $site_imprint_n)"
+    fail=1
+  fi
+  # 15e. Required links — each URL literal at least once across site/*.html.
+  for site_url in 'https://github.com/Titlan-chat/titlan' \
+                  'https://github.com/Titlan-chat/titlan/releases' \
+                  'https://github.com/Titlan-chat/titlan/blob/main/proto/envelope.md' \
+                  'https://github.com/Titlan-chat/titlan/blob/main/docs/threat-model.md' \
+                  'https://github.com/Titlan-chat/titlan/blob/main/SECURITY.md'; do
+    if ! cat site/*.html 2>/dev/null | grep -qF "$site_url"; then
+      echo "site: required link missing from site/*.html: $site_url"
+      fail=1
+    fi
+  done
+  # 15f. No placeholders.
+  site_placeholder_hits=$(grep -rniE 'TODO|TBD|FIXME|PLACEHOLDER|lorem ipsum' site || true)
+  if [ -n "$site_placeholder_hits" ]; then
+    echo "site: placeholder text under site/ (§Sequencing: no placeholders are ever committed):"
+    echo "$site_placeholder_hits"
+    fail=1
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant)."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6))."
