@@ -95,3 +95,14 @@ require a governed amendment. Referenced by governance ledger item 31.
    end to end.
 4. Interleave permitted: the docs-rider bundle, the
    AGP-9/compileSdk-37 unit, and the relay-harness ack-await chore.
+
+## Amendments
+
+- 2026-09-04 (ratified; ledger item 33): §D6's `titlan.app` and
+  `titlan.net` redirects are DEFERRED 2026-09-04 until the domains are
+  registered — both were found unregistered at the site unit; design
+  intact; defensive registration decided at the release-candidate
+  freeze (RC-D11). This section is appended after the ratified body;
+  the body's hash of record at chaining time remains
+  3fcce2e496771b77954242bdd146323fc8dc82cfe7a590260d1363a528678689
+  (verify: `git show 4e176cc:docs/design/p5d-release-freeze.md | sha256sum`).
