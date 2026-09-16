@@ -532,7 +532,8 @@ mailbox cap can be filled by a distributed adversary, at which point new
 pairings and recoveries fail uniformly (`503`). Records: work order §10.2
 relay-defaults resolution (2026-07-14: "All config; defaults only");
 `proto/relay-api.md §PUT /v1/mailboxes/{id}` (recovery-blocked-at-cap
-accepted). No ratified text names the volumetric residual — see the register.
+accepted). Ratified as the spec-1.0 posture 2026-08-27 (ledger item 29);
+see the register.
 
 ### TM-R6 — Spoofed relay and transport TLS
 
@@ -583,8 +584,8 @@ for reordering within a session). **RESIDUAL** for availability: a relay
 that silently drops or withholds traffic is indistinguishable from a quiet
 peer; there is no delivery receipt, no second path, and no relay
 attestation. The trust model states the relay is relied upon for
-availability in the honest-but-curious sense; no ratified text accepts the
-malicious-availability case explicitly — see the register.
+availability in the honest-but-curious sense; the malicious-availability case
+is ratified as accepted 2026-08-27 (ledger item 29); see the register.
 
 ### TM-R8 — Relay host compromise (elevation of privilege)
 
@@ -602,8 +603,8 @@ happens only at pairing and at recovery convergence — there is no
 content-asserted set (`NoNewPrivileges`, `MemoryDenyWriteExecute`, the
 syscall filter, and the `Protect*`/`Restrict*` lines) are verified for
 well-formedness only (CI job "Relay — systemd unit hardening (INV-3)"), not
-content-asserted. No ratified text addresses the post-compromise rotation
-gap — see the register.
+content-asserted. The post-compromise rotation gap is ratified as accepted
+2026-08-27 (ledger item 29); see the register.
 
 ### TM-R9 — Existence oracles and enumeration
 
@@ -1010,7 +1011,8 @@ CI job "Rust — cargo deny + audit (INV-6/INV-7)"; `.github/dependabot.yml`;
 `DEVELOPMENT.md`. **ACCEPTED:** the watch is reactive — a vulnerability is
 mitigated only after its advisory is published and the bump ships; there is
 no SLA on that interval (the SLA in `SECURITY.md` governs reports to the
-project, not upstream advisories). Record: none ratified — see the register.
+project, not upstream advisories). Record: ratified 2026-08-27
+(ledger item 29); see the register.
 
 ### TM-X4 — CI trust: third-party actions
 
@@ -1022,7 +1024,8 @@ tags (`actions/checkout@v7`, `Swatinem/rust-cache@v2`,
 action publisher could therefore alter build inputs, and the provenance
 attestation would attest the altered build faithfully. Reproducible builds
 give a downstream verifier a way to detect a divergence, but only if they
-rebuild. **RESIDUAL.** Record: none — see the register.
+rebuild. **RESIDUAL.** Record: ratified 2026-08-27 (ledger item 29);
+see the register.
 
 ### TM-X5 — Development-process provenance
 

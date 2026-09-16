@@ -103,5 +103,6 @@ the resulting reproducibility report next to the artifacts.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for vulnerability disclosure. The threat model
-document lands in Phase 5.
+See [SECURITY.md](SECURITY.md) for vulnerability disclosure and
+[docs/threat-model.md](docs/threat-model.md) for the threat model
+(STRIDE-lite, ratified residual register).

@@ -11,12 +11,16 @@ per-conversation (INV-5); a relay never assumes it is the only one.
 ## Docker (self-hosted, one-liner)
 
 ```sh
+docker build -f deploy/Dockerfile -t titlan-relay .
 docker run -d --name tezca-relay \
   --read-only --memory 1g --memory-swap 1g \
   -p 443:8443 -v /etc/relay-certs:/certs:ro \
-  ghcr.io/titlan-chat/titlan-relay:v0.2.0 \
+  titlan-relay \
   --tls-cert /certs/fullchain.pem --tls-key /certs/privkey.pem
 ```
+
+No pre-built image is published for the current release; the relay ships as
+an attested single binary on GitHub Releases (RC-D5).
 
 `--memory-swap == --memory` disables swap for the container (INV-3: mailbox
 memory never hits disk). `--read-only` because the relay writes nothing.
