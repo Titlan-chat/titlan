@@ -683,9 +683,112 @@ if [ -d site ]; then
   fi
 fi
 
+# --- 16. Docs riders (RC-D9 ordering; RC-D5 container image) ------------------
+# The release-candidate docs bundle (docs/design/2026-09-release-candidate-freeze.md
+# RC-D9) lands as one unit before the RC branch is cut; this family pins its
+# six documentation states so the bundle cannot regress: the README
+# threat-model pointer; the five register-pointer sentences in the threat model
+# (the "— see the register." none-ratified shape retired, "(ledger item 29)"
+# cited exactly five times); the user-docs halves of TM-C4/TM-C7 in
+# docs/user-notes.md; the deploy README building the relay image locally
+# (RC-D5: no pre-built image is published for this release); the §D6
+# words-amendment appended AFTER the byte-intact 97-line ratified body of the
+# 5d freeze (append, never edit); and the security address in site/index.html
+# wrapped in Cloudflare email_off/email_on comments without disturbing family
+# 15's static-content gates.
+# 16a. README: the stale Phase-5 line is gone; the threat-model link is present.
+if grep -qF 'document lands in Phase 5.' README.md; then
+  echo "docs rider 16a: README.md still carries the stale line 'document lands in Phase 5.' (RC-D9: threat-model pointer)"
+  fail=1
+fi
+if ! grep -qF '[docs/threat-model.md](docs/threat-model.md)' README.md; then
+  echo "docs rider 16a: README.md lacks the threat-model link '[docs/threat-model.md](docs/threat-model.md)' (RC-D9)"
+  fail=1
+fi
+# 16b. Threat model: the "— see the register." sentence shape (a residual with
+#      no ratified record) is retired — zero occurrences; the five ratified
+#      records each cite "(ledger item 29)" — exactly five occurrences.
+tm_dash_n=$(grep -oF -- '— see the register.' docs/threat-model.md | grep -c . || true)
+tm_l29_n=$(grep -oF '(ledger item 29)' docs/threat-model.md | grep -c . || true)
+if [ "$tm_dash_n" -ne 0 ]; then
+  echo "docs rider 16b: docs/threat-model.md still carries the retired '— see the register.' shape (found $tm_dash_n; expected 0)"
+  fail=1
+fi
+if [ "$tm_l29_n" -ne 5 ]; then
+  echo "docs rider 16b: docs/threat-model.md must cite '(ledger item 29)' exactly 5 times (found $tm_l29_n)"
+  fail=1
+fi
+# 16c. User notes: exist, Apache-2.0, and carry both user-docs halves
+#      (TM-C4 relay idle-mailbox TTL; TM-C7 Doze / battery optimization).
+if [ ! -f docs/user-notes.md ]; then
+  echo "docs rider 16c: MISSING docs/user-notes.md (RC-D9: user-docs halves of TM-C4/TM-C7)"
+  fail=1
+else
+  if ! head -5 docs/user-notes.md | grep -qF 'SPDX-License-Identifier: Apache-2.0'; then
+    echo "docs rider 16c: docs/user-notes.md lacks the Apache-2.0 SPDX header"
+    fail=1
+  fi
+  if ! grep -qF '14 d' docs/user-notes.md; then
+    echo "docs rider 16c: docs/user-notes.md lacks the TM-C4 relay idle-mailbox TTL ('14 d')"
+    fail=1
+  fi
+  if ! grep -qF 'battery optimization' docs/user-notes.md; then
+    echo "docs rider 16c: docs/user-notes.md lacks the TM-C7 Doze note ('battery optimization')"
+    fail=1
+  fi
+fi
+# 16d. Deploy README: no registry pull (RC-D5: no pre-built image is published
+#      for this release); the image is built locally from deploy/Dockerfile.
+if grep -q 'ghcr\.io' deploy/README.md; then
+  echo "docs rider 16d: deploy/README.md references ghcr.io (RC-D5: no pre-built image is published; build locally)"
+  fail=1
+fi
+if ! grep -qF 'docker build -f deploy/Dockerfile' deploy/README.md; then
+  echo "docs rider 16d: deploy/README.md lacks the local build line 'docker build -f deploy/Dockerfile' (RC-D5)"
+  fail=1
+fi
+# 16e. 5d freeze: the 97-line ratified body is byte-intact (hash of record),
+#      followed by a blank line 98 and line 99 exactly "## Amendments", and
+#      the section records the §D6 redirect deferral (append, never edit).
+p5d=docs/design/p5d-release-freeze.md
+p5d_body_sha='3fcce2e496771b77954242bdd146323fc8dc82cfe7a590260d1363a528678689'
+if [ "$(head -n 97 "$p5d" | sha256sum | cut -d' ' -f1)" != "$p5d_body_sha" ]; then
+  echo "docs rider 16e: $p5d lines 1-97 (ratified body) no longer hash to $p5d_body_sha — the ratified body is never edited"
+  fail=1
+fi
+p5d_lines=$(wc -l < "$p5d")
+p5d_l98=$(sed -n '98p' "$p5d")
+p5d_l99=$(sed -n '99p' "$p5d")
+if [ "$p5d_lines" -lt 99 ] || [ -n "$p5d_l98" ] || [ "$p5d_l99" != '## Amendments' ]; then
+  echo "docs rider 16e: $p5d must continue past the ratified body with a blank line 98 and line 99 exactly '## Amendments' (lines: $p5d_lines; line 98: '$p5d_l98'; line 99: '$p5d_l99')"
+  fail=1
+fi
+if ! grep -qF 'DEFERRED 2026-09-04' "$p5d"; then
+  echo "docs rider 16e: $p5d lacks the §D6 redirect deferral record 'DEFERRED 2026-09-04'"
+  fail=1
+fi
+# 16f. Site: the security address is wrapped for Cloudflare email obfuscation
+#      exactly once, and the wrapper (an HTML comment) leaves family 15's
+#      static-content gates untouched (re-asserted here on the edited file).
+site_email_wrap='<!--email_off-->security@titlan.chat<!--email_on-->'
+if [ -f site/index.html ]; then
+  site_email_n=$(grep -oF "$site_email_wrap" site/index.html | grep -c . || true)
+  if [ "$site_email_n" -ne 1 ]; then
+    echo "docs rider 16f: site/index.html must wrap the security address as '$site_email_wrap' exactly once (found $site_email_n)"
+    fail=1
+  fi
+  if grep -qiE '<script|<iframe|<img|<object|<embed|javascript:|@import|url\(' site/index.html; then
+    echo "docs rider 16f: site/index.html carries active/external content — the email_off wrapper must not disturb family 15b"
+    fail=1
+  fi
+else
+  echo "docs rider 16f: MISSING site/index.html (cannot assert the email_off wrapper)"
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5))."
