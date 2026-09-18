@@ -669,7 +669,7 @@ if [ -d site ]; then
                   'https://github.com/Titlan-chat/titlan/blob/main/proto/envelope.md' \
                   'https://github.com/Titlan-chat/titlan/blob/main/docs/threat-model.md' \
                   'https://github.com/Titlan-chat/titlan/blob/main/SECURITY.md'; do
-    if ! cat site/*.html 2>/dev/null | grep -qF "$site_url"; then
+    if ! grep -qF "$site_url" site/*.html 2>/dev/null; then
       echo "site: required link missing from site/*.html: $site_url"
       fail=1
     fi
