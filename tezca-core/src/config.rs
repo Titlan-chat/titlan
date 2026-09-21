@@ -3,11 +3,11 @@
 
 //! Configuration: padding profiles and the single default relay constant.
 
-/// The ONLY relay address literal in the entire codebase (INV-5). Every
-/// conversation stores its own relay URL; this constant is nothing more than
-/// the default filled into new conversations. Placeholder host pending the
-/// Titlan domain purchase (work order §10.4).
-pub const DEFAULT_RELAY_URL: &str = "wss://relay.invalid/v1";
+/// The ONLY relay address literal in the entire codebase (INV-5): the default
+/// filled into new conversations; each conversation's own relay config
+/// overrides it. Origin-only form — no path, no port: the relay client appends
+/// `/v1/` itself, so a trailing path here is a defect (freeze RC-D1).
+pub const DEFAULT_RELAY_URL: &str = "wss://relay.titlan.chat";
 
 /// Loopback relay URL pinned by test fixtures. Test scratch URLs are exempt
 /// from the INV-5 sweep by design (family 14), but the sweep's

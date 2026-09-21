@@ -35,6 +35,10 @@
     <p>Compute the hash of the file you downloaded and compare it with the SHA-256 on that release's entry:</p>
     <pre>sha256sum titlan.apk</pre>
     <p>This page does not repeat per-release hashes; the release entry is the authoritative place for them.</p>
+    <p>Each release entry also publishes the unsigned APK that CI built and attested (called <code>titlan-unsigned.apk</code> below). Verify the attestation, then confirm that the signed file is that exact build plus a signature:</p>
+    <pre>gh attestation verify titlan-unsigned.apk --repo Titlan-chat/titlan
+scripts/repro-build.sh --diff-apks titlan-unsigned.apk titlan.apk</pre>
+    <p>The comparison must report no differing entries. Release signing uses APK Signature Scheme v2 and v3 only, which add a signing block without touching any archive entry. Then check the certificate as in section 1.</p>
     <h2>3. Reproducible builds</h2>
     <p>The repository's <a href="https://github.com/Titlan-chat/titlan/blob/main/scripts/repro-build.sh">reproducible-build script</a> is what CI runs on every push and in every tagged build. What it does:</p>
     <ul>

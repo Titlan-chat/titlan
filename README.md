@@ -94,8 +94,9 @@ the resulting reproducibility report next to the artifacts.
 - CI produces **unsigned** release APKs and relay binaries, plus SBOMs,
   provenance attestations, and a reproducibility report.
 - Release signing happens offline, by the release manager, on a machine that
-  holds the release keystore. The documented flow (to be finalized in Phase 5
-  with the release checklist): download the tagged CI artifact, verify its
+  holds the release keystore. The documented flow is
+  [docs/release-checklist.md](docs/release-checklist.md); in summary: download
+  the tagged CI artifact, verify its
   provenance attestation and reproducibility report, verify its SHA-256
   against an independent local rebuild, then sign with `apksigner` and publish
   the signed APK's SHA-256.

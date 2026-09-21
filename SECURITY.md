@@ -6,7 +6,9 @@
 ## Supported versions
 
 Titlan is pre-release: there are no supported releases yet, and `main` is a
-moving pre-release target. Security reports against `main` are welcome.
+moving pre-release target. Pre-release builds may appear on GitHub Releases
+marked pre-release; they are not supported. Security reports against `main`
+and against pre-release builds are welcome.
 
 ## Reporting a vulnerability
 
