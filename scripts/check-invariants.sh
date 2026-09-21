@@ -237,13 +237,16 @@ if ! grep -qF "$sentinel_tag" "$doze_script" || ! grep -qF "$sentinel_text" "$do
   fail=1
 fi
 
-# --- 7. Debug-only RELAY_URL override; release BuildConfig untouched ----------
+# --- 7. Debug-only RELAY_URL override; release BuildConfig = INV-5 default -----
 # Checklist (f) points the DEBUG build at a LAN relay
 # (-PtitlanDebugRelayUrl=wss://<host>:<port>, maintainer-ratified F3); the
-# release BuildConfig must remain exactly the RFC 2606 placeholder with no
-# property read anywhere near it. Positive control first: if the debug block
-# stops reading the property (rename/refactor), this check must fail loudly
-# rather than pass vacuously.
+# release BuildConfig = the INV-5 production default, single-sourced by
+# equality with tezca-core/src/config.rs (freeze RC-D1), with no property read
+# anywhere near it. Positive control first: if the debug block stops reading
+# the property (rename/refactor), this check must fail loudly rather than pass
+# vacuously. Then the debug fallback and the release block (7a–7c), then the
+# production default (7d–7g): the literal at both sites, their equality, and
+# the origin-only form.
 bt_debug=$(awk '/^        debug \{/{f=1} f{print} f&&/^        \}/{exit}' "$gradle_build")
 bt_release=$(awk '/^        release \{/{f=1} f{print} f&&/^        \}/{exit}' "$gradle_build")
 if [ -z "$bt_release" ]; then
@@ -262,8 +265,29 @@ if printf '%s' "$bt_release" | grep -qE 'RELAY_URL|titlanDebugRelayUrl'; then
   echo "release buildType touches RELAY_URL / titlanDebugRelayUrl — release BuildConfig must stay untouched"
   fail=1
 fi
-if ! grep -qF 'buildConfigField("String", "RELAY_URL", "\"wss://relay.invalid\"")' "$gradle_build"; then
-  echo "defaultConfig RELAY_URL is no longer the literal release placeholder (wss://relay.invalid)"
+# 7d. defaultConfig carries exactly the production literal (RC-D1).
+if ! grep -qF 'buildConfigField("String", "RELAY_URL", "\"wss://relay.titlan.chat\"")' "$gradle_build"; then
+  echo "relay default 7d: ${gradle_build} defaultConfig does not carry exactly buildConfigField(\"String\", \"RELAY_URL\", \"\\\"wss://relay.titlan.chat\\\"\") (RC-D1)"
+  fail=1
+fi
+# 7e. The Rust constant carries exactly the production literal (RC-D1).
+if ! grep -qxF 'pub const DEFAULT_RELAY_URL: &str = "wss://relay.titlan.chat";' tezca-core/src/config.rs; then
+  echo "relay default 7e: tezca-core/src/config.rs does not carry exactly 'pub const DEFAULT_RELAY_URL: &str = \"wss://relay.titlan.chat\";' (RC-D1)"
+  fail=1
+fi
+# 7f. EQUALITY — deterministic extraction from both sites. Each sed matches
+#     exactly one line; the multi-line debug buildConfigField call never
+#     matches the single-line form.
+rs=$(sed -n 's/^pub const DEFAULT_RELAY_URL: &str = "\([^"]*\)";$/\1/p' tezca-core/src/config.rs)
+kt=$(sed -n 's/^ *buildConfigField("String", "RELAY_URL", "\\"\([^\\]*\)\\"")$/\1/p' "$gradle_build")
+if [ -z "$rs" ] || [ -z "$kt" ] || [ "$rs" != "$kt" ]; then
+  echo "relay default 7f: INV-5 default is not single-sourced by equality — tezca-core/src/config.rs DEFAULT_RELAY_URL='$rs' vs ${gradle_build} defaultConfig RELAY_URL='$kt' (both non-empty and equal)"
+  fail=1
+fi
+# 7g. NO PATH — origin only. The relay client appends /v1/ itself; a trailing
+#     path such as /v1 on the constant is a defect (RC-D1).
+if ! printf '%s' "$rs" | grep -qE '^wss://[A-Za-z0-9.-]+(:[0-9]+)?$'; then
+  echo "relay default 7g: DEFAULT_RELAY_URL '$rs' is not origin-only (must match ^wss://[A-Za-z0-9.-]+(:[0-9]+)?\$ — no path; the client appends /v1/)"
   fail=1
 fi
 
@@ -681,6 +705,32 @@ if [ -d site ]; then
     echo "$site_placeholder_hits"
     fail=1
   fi
+  # 15g. Verification linkage (RC-D3 via RC-D8): the verify page carries the
+  #      attestation command, the unsigned/signed entry comparison, and the
+  #      signing-scheme statement — each literal at least once.
+  for site_lit in 'gh attestation verify titlan-unsigned.apk --repo Titlan-chat/titlan' \
+                  '--diff-apks titlan-unsigned.apk titlan.apk' \
+                  'Signature Scheme v2 and v3'; do
+    if ! grep -qF -- "$site_lit" site/verify.html 2>/dev/null; then
+      echo "site 15g: site/verify.html lacks the verification-linkage literal: $site_lit"
+      fail=1
+    fi
+  done
+  # 15h. Pre-release copy (RC-D8): the landing page carries the pre-release
+  #      sentence exactly once and still says there are no supported releases.
+  #      Counted on whitespace-flattened text so a re-wrap cannot hide it.
+  site_prerelease='Pre-release builds may appear on GitHub Releases marked pre-release; they are not supported.'
+  if [ -f site/index.html ]; then
+    site_prerelease_n=$(tr '\n' ' ' < site/index.html | tr -s ' ' | grep -oF "$site_prerelease" | grep -c . || true)
+    if [ "$site_prerelease_n" -ne 1 ]; then
+      echo "site 15h: site/index.html must carry the pre-release sentence exactly once (found $site_prerelease_n): $site_prerelease"
+      fail=1
+    fi
+    if ! grep -qF 'There are no supported releases yet.' site/index.html; then
+      echo "site 15h: site/index.html no longer carries 'There are no supported releases yet.' (RC-D8 keeps it)"
+      fail=1
+    fi
+  fi
 fi
 
 # --- 16. Docs riders (RC-D9 ordering; RC-D5 container image) ------------------
@@ -786,9 +836,70 @@ else
   fail=1
 fi
 
+# --- 17. Release candidate (5d-2) ---------------------------------------------
+# The release-candidate unit (docs/design/2026-09-release-candidate-freeze.md,
+# sequencing step 3), beyond the relay default (family 7) and the site copy
+# (15g/15h): the release checklist exists and its gate literals are pinned so
+# document and tooling cannot drift (RC-D6: signing flags, tag form, verify
+# commands); the release identity (RC-D4); SECURITY.md carries the same
+# pre-release sentence as the site (RC-D8); the README points at the
+# checklist; and release.yml's run log records who pushed the tag (RC-D10).
+# 17a. The checklist exists, Apache-2.0 (checklist class).
+rc_checklist=docs/release-checklist.md
+if [ ! -f "$rc_checklist" ]; then
+  echo "release candidate 17a: MISSING $rc_checklist (RC-D6)"
+  fail=1
+elif [ "$(head -5 "$rc_checklist" | grep -cF 'SPDX-License-Identifier: Apache-2.0' || true)" -lt 1 ]; then
+  echo "release candidate 17a: $rc_checklist lacks the Apache-2.0 SPDX header"
+  fail=1
+fi
+# 17b. Gate literals — each at least once. An absent checklist fails every
+#      literal (2>/dev/null), exactly as an absent site/ fails 15a per file.
+for rc_lit in 'v0.1.0-rc.1' \
+              '--v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --min-sdk-version 34' \
+              'gh release create v0.1.0-rc.1 --prerelease --verify-tag' \
+              'gh attestation verify' \
+              '--diff-apks' \
+              'apksigner verify --print-certs' \
+              'relay.titlan.chat' \
+              'titlan-<tag>-unsigned.apk' \
+              'families 5a' \
+              'WHERE:'; do
+  if ! grep -qF -- "$rc_lit" "$rc_checklist" 2>/dev/null; then
+    echo "release candidate 17b: $rc_checklist lacks the gate literal: $rc_lit"
+    fail=1
+  fi
+done
+# 17c. Release identity (RC-D4): versionName is exactly the RC form.
+if ! grep -qE '^[[:space:]]*versionName = "0\.1\.0-rc\.1"$' "$gradle_build"; then
+  echo "release candidate 17c: ${gradle_build} does not carry exactly versionName = \"0.1.0-rc.1\" (RC-D4)"
+  fail=1
+fi
+# 17d. SECURITY.md carries the 15h pre-release sentence exactly once (RC-D8).
+#      Same literal as 15h, counted on whitespace-flattened text: the
+#      paragraph is wrapped, so the sentence spans lines.
+rc_prerelease='Pre-release builds may appear on GitHub Releases marked pre-release; they are not supported.'
+rc_prerelease_n=$(tr '\n' ' ' < SECURITY.md | tr -s ' ' | grep -oF "$rc_prerelease" | grep -c . || true)
+if [ "$rc_prerelease_n" -ne 1 ]; then
+  echo "release candidate 17d: SECURITY.md must carry the pre-release sentence exactly once (found $rc_prerelease_n): $rc_prerelease"
+  fail=1
+fi
+# 17e. README points at the checklist.
+if ! grep -qF '[docs/release-checklist.md](docs/release-checklist.md)' README.md; then
+  echo "release candidate 17e: README.md lacks the checklist link '[docs/release-checklist.md](docs/release-checklist.md)'"
+  fail=1
+fi
+# 17f. release.yml echoes the actor so the run log records who pushed the tag
+#      (RC-D10). The literal is a GitHub expression, not a shell expansion.
+# shellcheck disable=SC2016
+if ! grep -qF 'echo "release.yml triggered by ${{ github.actor }}"' .github/workflows/release.yml; then
+  echo 'release candidate 17f: .github/workflows/release.yml lacks the actor echo: echo "release.yml triggered by ${{ github.actor }}" (RC-D10)'
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2))."

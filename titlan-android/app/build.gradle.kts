@@ -53,16 +53,17 @@ android {
         minSdk = 34
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.1.0-rc.1"
         // Custom runner (androidTest source set): exports the CI relay TLS pin
         // from instrumentation args to the process env before app creation.
         testInstrumentationRunner = "app.titlan.TitlanTestRunner"
 
         // Default relay for THIS device's own inboxes (INV-5: per-conversation
         // relay still overrides; this is only the bootstrap/pairing default).
-        // RFC 2606 placeholder for release — a real onboarding relay picker is
-        // post-MVP. Debug overrides it to the CI test relay (below).
-        buildConfigField("String", "RELAY_URL", "\"wss://relay.invalid\"")
+        // Production default (RC-D1), single-sourced by equality with tezca-core
+        // DEFAULT_RELAY_URL (check-invariants family 7). Debug overrides it to
+        // the CI test relay (below).
+        buildConfigField("String", "RELAY_URL", "\"wss://relay.titlan.chat\"")
     }
 
     buildTypes {

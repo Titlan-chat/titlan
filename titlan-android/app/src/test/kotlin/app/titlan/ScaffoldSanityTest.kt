@@ -11,6 +11,6 @@ class ScaffoldSanityTest {
 
     @Test
     fun buildConfigIsGeneratedAndVersioned() {
-        assertTrue(BuildConfig.VERSION_NAME.matches(Regex("""\d+\.\d+\.\d+""")))
+        assertTrue(BuildConfig.VERSION_NAME.matches(Regex("""\d+\.\d+\.\d+(-rc\.\d+)?""")))
     }
 }
