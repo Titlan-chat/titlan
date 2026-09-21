@@ -32,7 +32,7 @@ jobs:
       - run: echo "release.yml triggered by ${{ github.actor }}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - run: rustup toolchain install
+      - run: rustup toolchain install && rustup target add aarch64-linux-android x86_64-linux-android
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -41,6 +41,10 @@ jobs:
       - uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3
         with:
           tool: cargo-cyclonedx
+      - uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3
+        with:
+          tool: cargo-ndk
+      - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
 
       - name: Build relay (release, locked)
         run: cargo build --release --locked -p tezca-relay
