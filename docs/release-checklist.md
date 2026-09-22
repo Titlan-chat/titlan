@@ -87,6 +87,15 @@ literals below.
   `titlan-android/app/build/outputs/apk/release/app-release-unsigned.apk` are
   equal in both reports, and equal `sha256sum tezca-relay titlan-<tag>-unsigned.apk`
   of the downloaded files.
+- WHERE: VM titlan-dev — `grep -E '^(ndk|cargo-ndk):' repro-report.txt`
+  expect: `ndk:          28.2.13676358 (canonical /tmp/tezca-repro/ndk)` and a
+  `cargo-ndk:` line; the leak gate printed `leak-gate compiler: compiler: /tmp/tezca-repro/ndk/…`.
+
+First execution (2026-09-21) stopped here: the published artifacts were repo-root
+builds, not the reported canonical ones, and canonical APKs differed across machines
+by OpenSSL's recorded NDK compiler path. Both resolved by the canonical NDK path and
+REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cached
+`target/` strings from ordinary Gradle builds carry a developer SDK path.
 
 ## 6. Signing (VM, maintainer only)
 
