@@ -122,10 +122,40 @@ build_once() {
 
 hash_of() { sha256sum "$BUILD_ROOT/$1" | cut -d' ' -f1; }
 
+# Host-path leak gate (release checklist §5, first execution 2026-09-21).
+# OpenSSL's Configure records the absolute C-compiler path ("compiler: …")
+# into libcrypto, outside rustc's --remap-path-prefix; it must sit under
+# $BUILD_ROOT so the string is identical on every machine, and no other
+# host path may survive in the packaged core library.
+leak_gate() {
+  local so_dir so compiler leaks
+  so_dir="$(mktemp -d)"
+  so="$so_dir/libtezca_core.so"
+  python3 - "$BUILD_ROOT/$APK" "$so" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    open(sys.argv[2], "wb").write(z.read("lib/arm64-v8a/libtezca_core.so"))
+PY
+  compiler="$(strings "$so" | grep '^compiler: ' | head -1 || true)"
+  leaks="$(strings "$so" | grep -E '/home/|/Users/|/usr/local/lib/android|/opt/hostedtoolcache|/root/' || true)"
+  rm -rf "$so_dir"
+  echo "leak-gate compiler: ${compiler:0:140}"
+  if ! printf '%s' "$compiler" | grep -qF "compiler: $BUILD_ROOT/ndk/"; then
+    echo "HOST-PATH LEAK: OpenSSL compiler string is not under $BUILD_ROOT/ndk/" >&2
+    return 1
+  fi
+  if [ -n "$leaks" ]; then
+    echo "HOST-PATH LEAK: host paths inside lib/arm64-v8a/libtezca_core.so:" >&2
+    printf '%s\n' "$leaks" >&2
+    return 1
+  fi
+}
+
 echo "== Reproducible-build check: pass 1/2 =="
 build_once
 relay_1=$(hash_of "$RELAY_BIN")
 apk_1=$(hash_of "$APK")
+leak_gate
 # Preserve build-1's APK before copy_tree destroys $BUILD_ROOT for pass 2
 # (evidence only; deleted again on PASS).
 rm -rf "$PRESERVE_DIR" && mkdir -p "$PRESERVE_DIR"
