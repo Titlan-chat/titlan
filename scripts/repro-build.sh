@@ -26,6 +26,12 @@ BUILD_ROOT="${REPRO_BUILD_ROOT:-/tmp/tezca-repro}"
 REPORT="${REPRO_REPORT:-$REPO/repro-report.txt}"
 CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
 
+# Pinned NDK, single-sourced from the Gradle build; linked at $BUILD_ROOT/ndk
+# so the path OpenSSL records is identical on every machine (see leak_gate).
+NDK_VERSION="$(grep -oP '^val pinnedNdkVersion = "\K[^"]+' "$REPO/titlan-android/app/build.gradle.kts")"
+NDK_REAL="${REPRO_NDK_HOME:-${ANDROID_HOME:?ANDROID_HOME must point at an SDK with ndk/$NDK_VERSION}/ndk/$NDK_VERSION}"
+[ -f "$NDK_REAL/source.properties" ] || { echo "pinned NDK $NDK_VERSION not found at $NDK_REAL" >&2; exit 1; }
+
 RELAY_BIN="target/release/tezca-relay"
 APK="titlan-android/app/build/outputs/apk/release/app-release-unsigned.apk"
 # Mismatch evidence (diagnostic only): both APKs are preserved here on
@@ -108,9 +114,11 @@ fi
 
 build_once() {
   copy_tree
+  ln -sfn "$NDK_REAL" "$BUILD_ROOT/ndk"
   (
     cd "$BUILD_ROOT"
     export CARGO_INCREMENTAL=0
+    export TITLAN_NDK_HOME="$BUILD_ROOT/ndk"
     # Remap embedded path strings to canonical roots so the binary carries no
     # host-specific paths (also see [profile.release] strip in Cargo.toml).
     export RUSTFLAGS="--remap-path-prefix=$BUILD_ROOT=/build --remap-path-prefix=$CARGO_HOME_DIR=/cargo"
@@ -122,14 +130,45 @@ build_once() {
 
 hash_of() { sha256sum "$BUILD_ROOT/$1" | cut -d' ' -f1; }
 
+# Host-path leak gate (release checklist §5, first execution 2026-09-21).
+# OpenSSL's Configure records the absolute C-compiler path ("compiler: …")
+# into libcrypto, outside rustc's --remap-path-prefix; it must sit under
+# $BUILD_ROOT so the string is identical on every machine, and no other
+# host path may survive in the packaged core library.
+leak_gate() {
+  local so_dir so compiler leaks
+  so_dir="$(mktemp -d)"
+  so="$so_dir/libtezca_core.so"
+  python3 - "$BUILD_ROOT/$APK" "$so" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    open(sys.argv[2], "wb").write(z.read("lib/arm64-v8a/libtezca_core.so"))
+PY
+  compiler="$(strings "$so" | grep '^compiler: ' | head -1 || true)"
+  leaks="$(strings "$so" | grep -E '/home/|/Users/|/usr/local/lib/android|/opt/hostedtoolcache|/root/' || true)"
+  rm -rf "$so_dir"
+  echo "leak-gate compiler: ${compiler:0:140}"
+  if ! printf '%s' "$compiler" | grep -qF "compiler: $BUILD_ROOT/ndk/"; then
+    echo "HOST-PATH LEAK: OpenSSL compiler string is not under $BUILD_ROOT/ndk/" >&2
+    return 1
+  fi
+  if [ -n "$leaks" ]; then
+    echo "HOST-PATH LEAK: host paths inside lib/arm64-v8a/libtezca_core.so:" >&2
+    printf '%s\n' "$leaks" >&2
+    return 1
+  fi
+}
+
 echo "== Reproducible-build check: pass 1/2 =="
 build_once
 relay_1=$(hash_of "$RELAY_BIN")
 apk_1=$(hash_of "$APK")
+leak_gate
 # Preserve build-1's APK before copy_tree destroys $BUILD_ROOT for pass 2
 # (evidence only; deleted again on PASS).
 rm -rf "$PRESERVE_DIR" && mkdir -p "$PRESERVE_DIR"
 cp "$BUILD_ROOT/$APK" "$PRESERVE_DIR/app-release-unsigned.build-1.apk"
+cp "$BUILD_ROOT/$RELAY_BIN" "$PRESERVE_DIR/tezca-relay.build-1"
 
 echo "== Reproducible-build check: pass 2/2 =="
 build_once
@@ -150,6 +189,8 @@ status=PASS
   echo "rustc:        $(rustc --version)"
   echo "cargo:        $(cargo --version)"
   echo "jdk:          $(java -version 2>&1 | head -1)"
+  echo "ndk:          $NDK_VERSION (canonical $BUILD_ROOT/ndk)"
+  echo "cargo-ndk:    $(cargo ndk --version)"
   echo
   echo "artifact: $RELAY_BIN"
   echo "  build-1 sha256: $relay_1"
@@ -168,6 +209,16 @@ status=PASS
   fi
 } | tee "$REPORT"
 
+# REPRO_KEEP_DIR (release.yml): on PASS, build 1's artifacts are the ones
+# published, so SHA256SUMS, this report and the attestation subjects
+# describe the same bytes.
+if [ "$status" = "PASS" ] && [ -n "${REPRO_KEEP_DIR:-}" ]; then
+  mkdir -p "$REPRO_KEEP_DIR"
+  cp "$PRESERVE_DIR/tezca-relay.build-1" "$REPRO_KEEP_DIR/tezca-relay"
+  cp "$PRESERVE_DIR/app-release-unsigned.build-1.apk" "$REPRO_KEEP_DIR/app-release-unsigned.apk"
+  [ "$(sha256sum "$REPRO_KEEP_DIR/tezca-relay" | cut -d' ' -f1)" = "$relay_1" ]
+  [ "$(sha256sum "$REPRO_KEEP_DIR/app-release-unsigned.apk" | cut -d' ' -f1)" = "$apk_1" ]
+fi
 if [ "$apk_1" = "$apk_2" ]; then
   rm -rf "$PRESERVE_DIR"
 fi

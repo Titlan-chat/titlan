@@ -46,26 +46,18 @@ jobs:
           tool: cargo-ndk
       - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
 
-      - name: Build relay (release, locked)
-        run: cargo build --release --locked -p tezca-relay
-
-      - name: Build unsigned release APK
-        run: ./gradlew --no-daemon :app:assembleRelease
-        working-directory: titlan-android
-
       - name: Generate SBOMs (CycloneDX)
         run: |
           cargo cyclonedx --format json
           (cd titlan-android && ./gradlew --no-daemon :app:cyclonedxDirectBom)
 
-      - name: Reproducibility report (double build + diff)
-        run: ./scripts/repro-build.sh
+      - name: Reproducible build (double build + diff) — build 1 is what ships
+        run: REPRO_KEEP_DIR="$PWD/dist" ./scripts/repro-build.sh
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          cp target/release/tezca-relay dist/
-          cp titlan-android/app/build/outputs/apk/release/app-release-unsigned.apk dist/titlan-android-unsigned.apk
+          mv dist/app-release-unsigned.apk dist/titlan-android-unsigned.apk
           cp tezca-core/tezca-core.cdx.json dist/
           cp tezca-relay/tezca-relay.cdx.json dist/
           cp titlan-android/app/build/reports/cyclonedx-direct/bom.json dist/titlan-android-app.cdx.json

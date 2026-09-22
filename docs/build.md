@@ -109,6 +109,26 @@ first and falling back to `0` where git is unavailable. With the pin,
 OpenSSL renders the pinned commit time in the banner and the `.so` is
 bit-identical across builds of the same commit.
 
+### The OpenSSL `compiler:` string and the canonical NDK path
+
+The same vendored OpenSSL also records its C-compiler command line into
+`libtezca_core.so` as a `compiler: <absolute NDK clang path> …` string.
+OpenSSL's Configure bakes it in at C-compile time, so rustc's
+`--remap-path-prefix` cannot reach it, and two machines whose SDKs live at
+different paths produce different canonical APKs. `scripts/repro-build.sh`
+therefore links the pinned NDK at `$BUILD_ROOT/ndk` and exports
+`TITLAN_NDK_HOME` to that symlink; the Gradle `cargoNdkBuild*` tasks honour
+`TITLAN_NDK_HOME` (ordinary builds fall back to the SDK's pinned NDK) and
+assert at execution that the NDK's `source.properties` `Pkg.Revision`
+equals `pinnedNdkVersion`. The recorded string is then
+`compiler: /tmp/tezca-repro/ndk/…` on every machine, and the script's leak
+gate fails the run if it is not, or if any other host path survives in the
+packaged core library. A developer `local.properties` (`sdk.dir`) governs
+ordinary Gradle builds but not `scripts/repro-build.sh`, whose build trees
+exclude it. Cached `target/` output from ordinary Gradle builds therefore
+carries the developer SDK path — only `scripts/repro-build.sh` output is
+evidence.
+
 ## SBOMs (CycloneDX)
 
 ```sh

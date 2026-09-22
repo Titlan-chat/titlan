@@ -139,10 +139,24 @@ android {
 fun Exec.cargoNdkCommon() {
     group = "build"
     workingDir = repoRoot
-    environment(
-        "ANDROID_NDK_HOME",
-        File(android.sdkDirectory, "ndk/$pinnedNdkVersion").absolutePath,
-    )
+    // OpenSSL's Configure records the NDK clang path verbatim into
+    // libtezca_core.so ("compiler: …", outside rustc's remap), so
+    // reproducible builds hand cargo-ndk a canonical path: TITLAN_NDK_HOME,
+    // set by scripts/repro-build.sh to a symlink under its build root.
+    // Ordinary builds fall back to the SDK's pinned NDK. Either way the NDK
+    // must be the pinned revision; checked at execution, not configuration,
+    // so tasks that never cross-compile (SBOM, lint) stay NDK-agnostic.
+    val ndkHome = System.getenv("TITLAN_NDK_HOME")
+        ?: File(android.sdkDirectory, "ndk/$pinnedNdkVersion").absolutePath
+    environment("ANDROID_NDK_HOME", ndkHome)
+    doFirst {
+        val revision = File(ndkHome, "source.properties").readLines()
+            .firstOrNull { it.startsWith("Pkg.Revision") }
+            ?.substringAfter("=")?.trim()
+        require(revision == pinnedNdkVersion) {
+            "NDK at $ndkHome is revision $revision; pinned $pinnedNdkVersion"
+        }
+    }
     // The workspace release profile strips .symtab, which uniffi-bindgen's
     // library mode needs for metadata extraction. Build these .so unstripped
     // — AGP strips packaged jniLibs itself, so the APK is unaffected.
