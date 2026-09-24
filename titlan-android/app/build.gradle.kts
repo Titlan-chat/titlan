@@ -52,8 +52,8 @@ android {
         // locked decision).
         minSdk = 34
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-rc.1"
+        versionCode = 2
+        versionName = "0.1.0-rc.2"
         // Custom runner (androidTest source set): exports the CI relay TLS pin
         // from instrumentation args to the process env before app creation.
         testInstrumentationRunner = "app.titlan.TitlanTestRunner"
