@@ -69,18 +69,16 @@ Dependencies are locked in `app/gradle.lockfile`. To bump versions, edit
 ./gradlew :app:assembleDebug :app:assembleRelease :app:lintDebug :app:testDebugUnitTest --write-locks
 ```
 
-### Release TLS trust (rustls-platform-verifier)
+### Release TLS trust (bundled Mozilla roots)
 
-The relay client trusts platform roots through `rustls-platform-verifier`.
-On Android that crate needs two things the app provides (5d-3):
-
-- its Kotlin component, `org.rustls.platformverifier`, which the locked
-  `rustls-platform-verifier-android` crate ships as an AAR in a local Maven
-  layout — `settings.gradle.kts` locates that directory with
-  `cargo metadata --locked`, and `gradle/libs.versions.toml` pins the version
-  to the crate's (check-invariants family 18c); and
-- a one-time `PlatformTrust.nativeInit(context)` from `TitlanApp.onCreate`,
-  the JNI export in `tezca-android-trust/src/lib.rs` (a separate crate: tezca-core stays `#![forbid(unsafe_code)]`), before any core use.
+The relay client trusts the bundled Mozilla root store (`webpki-roots`,
+generated from CCADB) for every connection that carries no per-conversation
+pin — on Linux, in CI and on Android alike (RC-D7 as amended, 5d-4). The
+device's own certificate store, including user-installed CAs, is never
+consulted, and no live revocation check is performed. The store is compiled
+into `libtezca_core.so` and updates when the crate is bumped. Single
+trust-store site: `tezca-core/src/relay_client/ws/pin.rs`
+(check-invariants family 18b).
 
 The debug suites run under the CI test anchor and never reach this path, so
 the release checklist's §0 proves it on a device before every tag.

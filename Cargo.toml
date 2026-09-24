@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "3"
-members = ["tezca-android-trust", "tezca-core", "tezca-relay", "uniffi-bindgen"]
+members = ["tezca-core", "tezca-relay", "uniffi-bindgen"]
 # The fuzz crates are their own workspaces (cargo-fuzz convention,
 # nightly-only).
 exclude = ["tezca-core/fuzz", "tezca-relay/fuzz"]
@@ -56,12 +56,10 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-rustls-platform-verifier = "0.7"
-# jni: the JNI entry that hands rustls-platform-verifier the Android Context
-# (tezca-core/src/platform_trust.rs, 5d-3). Already in the lockfile beneath
-# the verifier; this direct edge moves ONLY in lockstep with it (same rule
-# class as the rand pin, work order §10.2).
-jni = { version = "0.22", default-features = false }
+# webpki-roots: the bundled Mozilla root store (CCADB) — the no-pin trust
+# anchors on every platform (RC-D7 as amended, 5d-4). Data only, not crypto
+# (INV-6 untouched); CDLA-Permissive-2.0 (deny.toml allow list).
+webpki-roots = "1.0"
 # ring: INV-6-approved (named alongside libsignal/rustls). Used only for the
 # SHA-256 of a cert SPKI in the optional per-conversation TLS pin verifier.
 ring = "0.17"

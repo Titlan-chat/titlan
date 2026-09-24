@@ -185,3 +185,14 @@ Base of the findings: titlan `main` `0ea1f505b61f1e9715eb1b4a0bbc18839aa65694`.
 5. Successors named at this freeze: `5e-1 conversation UI` (design gate
    first), RC-D1 option (b) chore, CI-created draft Releases (titlan-ops),
    container image publication (titlan-ops), signed tags, RC-D11.
+
+## Amendments
+
+- **RC-D7 (2026-09-24, maintainer "A"):** release trust is the bundled Mozilla
+  root store (`webpki-roots`) on every platform, not the platform verifier.
+  Rationale: finding F-C′ — rustls-platform-verifier's Android component
+  reports CRL-only Let's Encrypt certificates as revoked (upstream #221), so
+  the frozen mechanism cannot connect to `relay.titlan.chat`. Per-conversation
+  pins and the debug test anchor are unchanged. Unit
+  `5d-4 release-trust-webpki`; gate `p5-5d4-release-trust-webpki-gate.md`
+  (sha256 fb501a8ac63e6294265a3102a18348b43e6acef603fd5d25f980029664553567).

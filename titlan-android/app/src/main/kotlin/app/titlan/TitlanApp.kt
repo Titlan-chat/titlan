@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.system.Os
 import android.view.WindowManager
 import app.titlan.core.AppCore
-import app.titlan.core.PlatformTrust
 
 /**
  * Application entry point. Central FLAG_SECURE enforcement
@@ -30,10 +29,6 @@ class TitlanApp : Application() {
         // by scripts/check-invariants.sh §8. Dead branch in release
         // (DEBUG = false; the release .so carries no anchor code either).
         if (BuildConfig.DEBUG) exportDebugRelayPin()
-        // Release TLS trust (5d-3, PV-D2): hand rustls-platform-verifier the app
-        // context before any core touch. Fail fast — a non-connecting app with
-        // no stated reason is what v0.1.0-rc.1 was.
-        check(PlatformTrust.nativeInit(this)) { "platform trust init failed" }
         // Capture the app context for the single process-wide core (A3). Opening
         // is still lazy — first pairing/sync call opens the encrypted store.
         AppCore.init(this)

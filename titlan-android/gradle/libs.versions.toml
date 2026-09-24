@@ -38,11 +38,6 @@ androidx-camera-core = { group = "androidx.camera", name = "camera-core", versio
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
-# rustls-platform-verifier's Android component (5d-3, PV-D1a): the AAR
-# shipped inside the LOCKED rustls-platform-verifier-android crate, resolved
-# from a cargo-metadata path in settings.gradle.kts. The version equals that
-# crate's Cargo.lock version (check-invariants family 18c); never dynamic.
-rustls-platform-verifier = { group = "rustls", name = "rustls-platform-verifier", version = "0.1.1" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
