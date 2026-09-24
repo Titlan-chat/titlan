@@ -263,7 +263,7 @@ never guessed. **MITIGATED.** Venues: INV-4; `proto/envelope.md §Layer 1`,
 `tezca-core/src/pairing.rs :: mailbox_update_v1_with_trailing_bytes_is_malformed`,
 `tezca-core/src/pairing_v3_acceptance.rs :: r8_trailing_bytes_after_offer_sig_reject`;
 CI job "Fuzz — envelope + relay parsers (INV-4)" (four cargo-fuzz targets,
-90 s each, on every push and PR). Crate-level `#![forbid(unsafe_code)]` in every crate that parses input (the `tezca-android-trust` JNI seam allows the lint for one symbol-export attribute and holds no unsafe block — check-invariants 18f)
+90 s each, on every push and PR). Workspace-wide `#![forbid(unsafe_code)]`
 removes memory-unsafety from the parser threat class (ledger item 23, F1
 ADOPT-A; enforced by the compiler in
 CI job "Rust — fmt, clippy, build, test"). The pairing-specific frame
@@ -538,14 +538,17 @@ see the register.
 ### TM-R6 — Spoofed relay and transport TLS
 
 The client speaks `wss`/`https` under rustls (ring provider) and accepts a
-server certificate in one of two ways: **platform trust roots** (the
-default, via the platform verifier), or a **per-conversation leaf-certificate
+server certificate in one of two ways: **the bundled Mozilla root store** (the
+default: `webpki-roots`, generated from Mozilla's CCADB and shipped in the
+binary; the device's own store — including user-installed CAs — is never
+consulted), or a **per-conversation leaf-certificate
 pin** (SHA-256 of the leaf DER) that bypasses CA validation and trusts
 exactly one certificate. Cleartext is never permitted outside the debug
 build, and the debug-only CI trust anchor is kept out of release by five
 static checks and a binary scan of the release `.so`. A spoofed relay under
-platform trust therefore requires CA mis-issuance or a compromised root
-store, and even then obtains only the relay operator's view (TM-R2) plus the
+bundled-root trust therefore requires mis-issuance by a Mozilla-program CA (a
+Certificate-Transparency-logged event), and even then obtains only the relay
+operator's view (TM-R2) plus the
 ability to drop traffic (TM-R7) — never content. **MITIGATED** for the
 pin path and for the release-carries-no-test-anchor property: A2 (rustls/ring
 are the audited TLS crates INV-6 names);
@@ -559,8 +562,8 @@ debug/release Gradle split, anchor string absent from every release `.so`).
 **ACCEPTED — the certificate-pinning posture at spec 1.0:** pinning is
 "optional-but-designed" (work order §6 Phase 4): the core stores an optional
 `relay_pin` per conversation and honors it on every subscribe, but no FFI
-method and no UI sets it, so every release build runs on platform trust
-roots; the pin is exercised only by the debug/CI test anchor. SPKI-scoped
+method and no UI sets it, so every release build runs on the bundled root
+store; the pin is exercised only by the debug/CI test anchor. SPKI-scoped
 pinning (surviving certificate renewal) is likewise designed, not built.
 Records: work order §6 Phase 4 ("certificate pinning to configured relay
 optional-but-designed"); the Phase 5 plan of record's "certificate-pinning
@@ -569,12 +572,15 @@ exercised at 5d-2"). The relay's own TLS certificate is rotated by process
 restart (no hot reload) — `proto/relay-api.md §Resolved and open items`, a
 post-MVP operational item.
 
-On Android the platform verifier is live only once its bundled Kotlin
-component (`org.rustls.platformverifier`, pinned to the locked support crate)
-is packaged and the app hands it the application context at startup
-(`PlatformTrust.nativeInit`); both are asserted by check-invariants family 18
-and exercised by release-checklist §0 before every tag (5d-3, finding F-C:
-v0.1.0-rc.1 shipped without either and could not connect).
+No live revocation check is performed on any platform: rustls fetches neither
+CRLs nor OCSP, and the Android platform verifier's attempt to do so is what
+broke the rc.1/rc.2 candidates (finding F-C′: Let's Encrypt certificates are
+CRL-only since August 2025 and Android cannot fetch the CRL, so a valid
+certificate was reported revoked — upstream rustls-platform-verifier #221).
+Mitigations: 90-day certificate lifetime today; short-lived (6-day)
+certificates and Certificate Transparency monitoring for `relay.titlan.chat`
+are named successors (5d-4). The trust store is single-sourced (check-invariants
+family 18) and exercised by release-checklist §0 before every tag.
 
 ### TM-R7 — A malicious relay (integrity and availability)
 
@@ -962,8 +968,8 @@ toolchains are pinned (`rust-toolchain.toml`, a pinned NDK, a pinned nightly
 for fuzzing); release and relay artifacts are built twice and byte-compared;
 CycloneDX SBOMs are generated for core, relay, and the APK dependency
 closure; tagged builds carry a SLSA-style build-provenance attestation over
-the relay binary and the unsigned APK; `unsafe` is forbidden in-source in tezca-core, tezca-relay and uniffi-bindgen; the
-`tezca-android-trust` JNI seam holds no unsafe block (one symbol-export attribute, 18f). **MITIGATED.** Venues: INV-6; INV-7; A2;
+the relay binary and the unsigned APK; `unsafe` is forbidden in-source in all
+three crates. **MITIGATED.** Venues: INV-6; INV-7; A2;
 CI job "Rust — cargo deny + audit (INV-6/INV-7)";
 CI job "Reproducible build — double build + diff";
 CI job "SBOM — CycloneDX (core, relay, APK deps)";
@@ -1073,7 +1079,7 @@ text at spec 1.0 and were ratified at this document's grading,
 | TM-R4 | relay | ACCEPTED | restart loses deposited-but-unfetched blobs silently (no e2e receipt at 1.0); re-pair-only cases: total loss before the handoff lands; root-less conversations; recovery blocked at the global cap | INV-3; `proto/inner-frame.md §Derived recovery-mailbox IDs` (frozen §8); `proto/recovery.md §6. Conversations without a recovery root`; `proto/relay-api.md §PUT /v1/mailboxes/{id}`; 4b-2 freeze §8 |
 | TM-R5 | relay | RESIDUAL | volumetric / transport-layer DoS has no in-protocol defense (deployment concern) | maintainer ratification 2026-08-27 ("Ratify all five, assignments as recommended") — governance ledger item 29 |
 | TM-R5 | relay | ACCEPTED | IP-keyed limiter shape: NAT populations share budgets; multi-address adversaries multiply theirs; a distributed adversary can fill the global mailbox cap (uniform `503`) | work order §10.2 relay-defaults resolution (2026-07-14, "All config; defaults only"); `proto/relay-api.md §PUT /v1/mailboxes/{id}` (recovery-blocked-at-cap) |
-| TM-R6 | relay | ACCEPTED | certificate-pinning posture: designed in core (per-conversation `relay_pin`), not reachable from FFI/UI; release builds run on platform trust roots; SPKI pinning not built; relay cert rotation by restart only | work order §6 Phase 4 ("optional-but-designed"); plan of record "certificate-pinning posture" (ledger item 22); ledger item 24 (5d-2 row); `proto/relay-api.md §Resolved and open items` |
+| TM-R6 | relay | ACCEPTED | certificate-pinning posture: designed in core (per-conversation `relay_pin`), not reachable from FFI/UI; release builds run on the bundled Mozilla root store (5d-4); SPKI pinning not built; relay cert rotation by restart only | work order §6 Phase 4 ("optional-but-designed"); plan of record "certificate-pinning posture" (ledger item 22); ledger item 24 (5d-2 row); `proto/relay-api.md §Resolved and open items` |
 | TM-R7 | relay | RESIDUAL | a malicious relay can drop, delay, withhold, or ack-delete traffic undetectably (availability); no receipt, no second path, no attestation | maintainer ratification 2026-08-27 ("Ratify all five, assignments as recommended") — governance ledger item 29 (the trust model states honest-but-curious reliance for availability) |
 | TM-R8 | relay | RESIDUAL | post-compromise: mailbox ids learned on the host stay valid until pairing/recovery rotation; no suspected-compromise rotation trigger; unit directives beyond the content-asserted six are syntax-verified only | maintainer ratification 2026-08-27 ("Ratify all five, assignments as recommended") — governance ledger item 29 |
 | TM-P1 | pairing | ACCEPTED | complete-offer compromise: a holder of the entire offer can pair as the responder within the window; not an MITM defense | `proto/pairing.md §Ledgered risks`; v3 freeze §3; 4b-2 freeze §3, §10 |

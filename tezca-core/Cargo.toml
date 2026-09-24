@@ -40,16 +40,9 @@ reqwest = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tokio-rustls = { workspace = true }
 rustls = { workspace = true }
-rustls-platform-verifier = { workspace = true }
+webpki-roots = { workspace = true }
 ring = { workspace = true }
 uniffi = { workspace = true }
-
-# Android only: the platform-verifier bootstrap JNI seam (5d-3, PV-D2 as
-# amended by R-B). Lives in its own crate because this crate is
-# #![forbid(unsafe_code)] and the JNI symbol export is an unsafe attribute.
-# Linked by `use tezca_android_trust as _;` in lib.rs.
-[target.'cfg(target_os = "android")'.dependencies]
-tezca-android-trust = { path = "../tezca-android-trust" }
 
 [features]
 # Debug/CI-only trust anchor for the test relay (maintainer-ratified 4b-2):

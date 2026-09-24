@@ -114,18 +114,21 @@ pub(crate) fn install_ring_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-/// Builds the engine's reqwest client. In `test-relay-anchor` builds with
-/// `TEZCA_TEST_RELAY_PIN` set, https:// requests trust exactly the pinned
-/// test-relay certificate (same [`pin`] verifier as the wss leg); otherwise
-/// this is a stock client and release builds compile the anchor path out.
+/// Builds the engine's reqwest client over the SAME trust decision as the wss
+/// leg: in `test-relay-anchor` builds with `TEZCA_TEST_RELAY_PIN` set, exactly
+/// the pinned test-relay certificate; otherwise the bundled Mozilla root store
+/// ([`pin::bundled_client_config`]). reqwest is always handed the config, so
+/// its own verifier construction is never reached (family 18b).
 pub(crate) fn build_http_client() -> Result<reqwest::Client> {
-    let builder = reqwest::Client::builder();
     #[cfg(feature = "test-relay-anchor")]
-    let builder = match pin::env_test_pin() {
-        Some(p) => builder.use_preconfigured_tls(pin::pinned_client_config(p)?),
-        None => builder,
+    let config = match pin::env_test_pin() {
+        Some(p) => pin::pinned_client_config(p)?,
+        None => pin::bundled_client_config()?,
     };
-    builder
+    #[cfg(not(feature = "test-relay-anchor"))]
+    let config = pin::bundled_client_config()?;
+    reqwest::Client::builder()
+        .use_preconfigured_tls(config)
         .build()
         .map_err(|e| CoreError::Network(e.to_string()))
 }
