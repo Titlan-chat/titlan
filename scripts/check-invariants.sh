@@ -855,15 +855,16 @@ elif [ "$(head -5 "$rc_checklist" | grep -cF 'SPDX-License-Identifier: Apache-2.
 fi
 # 17b. Gate literals — each at least once. An absent checklist fails every
 #      literal (2>/dev/null), exactly as an absent site/ fails 15a per file.
-for rc_lit in 'v0.1.0-rc.1' \
+for rc_lit in 'v0.1.0-rc.2' \
               '--v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --min-sdk-version 34' \
-              'gh release create v0.1.0-rc.1 --prerelease --verify-tag' \
+              'gh release create v0.1.0-rc.2 --prerelease --verify-tag' \
               'gh attestation verify' \
               '--diff-apks' \
               'apksigner verify --print-certs' \
               'relay.titlan.chat' \
               'titlan-<tag>-unsigned.apk' \
               'families 5a' \
+              '## 0. Pre-tag device smoke' \
               'WHERE:'; do
   if ! grep -qF -- "$rc_lit" "$rc_checklist" 2>/dev/null; then
     echo "release candidate 17b: $rc_checklist lacks the gate literal: $rc_lit"
@@ -871,8 +872,12 @@ for rc_lit in 'v0.1.0-rc.1' \
   fi
 done
 # 17c. Release identity (RC-D4): versionName is exactly the RC form.
-if ! grep -qE '^[[:space:]]*versionName = "0\.1\.0-rc\.1"$' "$gradle_build"; then
-  echo "release candidate 17c: ${gradle_build} does not carry exactly versionName = \"0.1.0-rc.1\" (RC-D4)"
+if ! grep -qE '^[[:space:]]*versionName = "0\.1\.0-rc\.2"$' "$gradle_build"; then
+  echo "release candidate 17c: ${gradle_build} does not carry exactly versionName = \"0.1.0-rc.2\" (RC-D4)"
+  fail=1
+fi
+if ! grep -qE '^[[:space:]]*versionCode = 2$' "$gradle_build"; then
+  echo "release candidate 17c: ${gradle_build} does not carry exactly versionCode = 2 (RC-D4: every tag increments it)"
   fail=1
 fi
 # 17d. SECURITY.md carries the 15h pre-release sentence exactly once (RC-D8).
@@ -897,9 +902,108 @@ if ! grep -qF 'echo "release.yml triggered by ${{ github.actor }}"' .github/work
   fail=1
 fi
 
+# --- 18. Release TLS trust on Android — platform-verifier wiring (5d-3) -------
+# Finding F-C (v0.1.0-rc.1, checklist §8): rustls-platform-verifier's Android
+# backend needs its Kotlin component in the APK AND a one-time init with the
+# application Context before any handshake; otherwise every connection that
+# carries no per-conversation pin — the production default — panics inside
+# TLS. Four static gates (18a–18d) and one artifact gate (18e). The dynamic
+# proof is release-checklist §0 (a device), because the debug suites run under
+# the test anchor and never reach the platform path.
+pv_kt="titlan-android/app/src/main/kotlin/app/titlan/core/PlatformTrust.kt"
+pv_rs="tezca-android-trust/src/lib.rs"
+pv_call='check(PlatformTrust.nativeInit(this)) { "platform trust init failed" }'
+pv_catalog="titlan-android/gradle/libs.versions.toml"
+pv_class='org/rustls/platformverifier/CertificateVerifier'
+# 18a. The init call exists in TitlanApp.onCreate and precedes AppCore.init
+#      (same line-order argument as 8c: onCreate is one linear body).
+if ! grep -qF "$pv_call" "$titlan_app"; then
+  echo "platform trust 18a: $titlan_app lacks the init call: $pv_call"
+  fail=1
+fi
+pv_line=$(grep -nF "$pv_call" "$titlan_app" | head -n 1 | cut -d: -f1 || true)
+if [ -z "$pv_line" ] || [ -z "$core_line" ] || [ "$pv_line" -ge "$core_line" ]; then
+  echo "platform trust 18a: init call does not precede AppCore.init in $titlan_app (init=$pv_line core=$core_line)"
+  fail=1
+fi
+# 18b. Both halves of the JNI seam carry the declared names (the Rust export
+#      name is derived from the Kotlin package/class/method).
+if [ ! -f "$pv_kt" ] || ! grep -qF 'external fun nativeInit(context: Context): Boolean' "$pv_kt" \
+   || ! grep -qF 'System.loadLibrary("tezca_core")' "$pv_kt"; then
+  echo "platform trust 18b: $pv_kt missing or lacks the nativeInit/loadLibrary declarations"
+  fail=1
+fi
+if [ ! -f "$pv_rs" ] || ! grep -qF 'Java_app_titlan_core_PlatformTrust_nativeInit' "$pv_rs" \
+   || ! grep -qF 'rustls_platform_verifier::android::init_with_env' "$pv_rs"; then
+  echo "platform trust 18b: $pv_rs missing or lacks the JNI export / init_with_env call"
+  fail=1
+fi
+if ! grep -qF 'use tezca_android_trust as _;' tezca-core/src/lib.rs || ! grep -qF '#![forbid(unsafe_code)]' tezca-core/src/lib.rs; then
+  echo "platform trust 18b: tezca-core/src/lib.rs must link tezca-android-trust (a link-only use — the export is dropped from the cdylib otherwise) and keep #![forbid(unsafe_code)]"
+  fail=1
+fi
+# 18c. The Android component is pinned to exactly the locked support-crate
+#      version — single-sourced from Cargo.lock; never a dynamic version.
+pv_lock_ver=$(grep -A1 '^name = "rustls-platform-verifier-android"$' Cargo.lock | grep -oP '^version = "\K[^"]+' || true)
+if [ -z "$pv_lock_ver" ]; then
+  echo "platform trust 18c: rustls-platform-verifier-android missing from Cargo.lock"
+  fail=1
+elif ! grep -qF "rustls-platform-verifier = { group = \"rustls\", name = \"rustls-platform-verifier\", version = \"$pv_lock_ver\" }" "$pv_catalog"; then
+  echo "platform trust 18c: $pv_catalog must pin rustls:rustls-platform-verifier to exactly $pv_lock_ver (Cargo.lock)"
+  fail=1
+fi
+if ! grep -qF 'implementation(libs.rustls.platform.verifier)' "$gradle_build"; then
+  echo "platform trust 18c: $gradle_build lacks implementation(libs.rustls.platform.verifier)"
+  fail=1
+fi
+if ! grep -qF 'it["name"] == "rustls-platform-verifier-android"' titlan-android/settings.gradle.kts; then
+  echo "platform trust 18c: titlan-android/settings.gradle.kts does not resolve the component's Maven directory from cargo metadata"
+  fail=1
+fi
+# 18d. Keep rule present (inert while minify is off; guards a future flip).
+if ! grep -qF -- '-keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }' "${android_app}/proguard-rules.pro" 2>/dev/null; then
+  echo "platform trust 18d: ${android_app}/proguard-rules.pro lacks the org.rustls.platformverifier keep rule"
+  fail=1
+fi
+# 18e. Artifact gate: the verifier class is in the RELEASE dex. Post-assemble,
+#      skipped with a note when nothing is built (the 5e pattern).
+pv_apk="${android_app}/build/outputs/apk/release/app-release-unsigned.apk"
+if [ -f "$pv_apk" ]; then
+  pv_hits=$(unzip -p "$pv_apk" 'classes*.dex' | grep -ac "L${pv_class};" || true)
+  if [ "$pv_hits" -lt 1 ]; then
+    echo "platform trust 18e: release APK dex lacks $pv_class — the Android verifier component is not packaged ($pv_apk)"
+    fail=1
+  fi
+else
+  echo "note: 18e dex scan skipped (no release APK at $pv_apk)"
+fi
+
+# 18f. The JNI seam crate is the workspace's ONLY unsafe_code allowance, and
+#      it is an attribute (#[unsafe(no_mangle)]), never a block: no unsafe
+#      block/fn/impl anywhere in-source, and the three original crates keep
+#      their crate-level forbid (ledger item 23; threat model words-amendment
+#      5d-3 R-B).
+pv_allow_hits=$(list_files | grep -E '(^|/)Cargo\.toml$' | xargs -r grep -lF 'unsafe_code = "allow"' 2>/dev/null | sort || true)
+if [ "$pv_allow_hits" != "tezca-android-trust/Cargo.toml" ]; then
+  echo "platform trust 18f: unsafe_code = \"allow\" must appear in exactly tezca-android-trust/Cargo.toml; found: ${pv_allow_hits:-<nowhere>}"
+  fail=1
+fi
+pv_unsafe_hits=$(list_files | grep -E '\.rs$' | xargs -r grep -nE 'unsafe \{|unsafe fn |unsafe impl ' 2>/dev/null || true)
+if [ -n "$pv_unsafe_hits" ]; then
+  echo "platform trust 18f: unsafe block/fn/impl found in-source (item 23 permits none):"
+  echo "$pv_unsafe_hits"
+  fail=1
+fi
+for pv_forbid_file in tezca-core/src/lib.rs tezca-relay/src/lib.rs uniffi-bindgen/src/main.rs; do
+  if ! grep -qF '#![forbid(unsafe_code)]' "$pv_forbid_file"; then
+    echo "platform trust 18f: $pv_forbid_file lost #![forbid(unsafe_code)] (ledger item 23)"
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), platform trust (5d-3))."

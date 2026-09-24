@@ -1,16 +1,43 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
 
-# Titlan release checklist (5d-2 / v0.1.0-rc.1)
+# Titlan release checklist (5d-2 → 5d-3 / v0.1.0-rc.2)
 
 Authority: [the release-candidate freeze](design/2026-09-release-candidate-freeze.md),
 RC-D6. Executed by hand by the maintainer, top to bottom. Every step names
 WHERE it runs — `CI`, `VM titlan-dev`, `Windows`, `droplet` or `GitHub` — and
 every gate states the value it must show; a gate that shows anything else
-stops the release. `<tag>` is `v0.1.0-rc.1`; `<rc>` is the merged RC commit on
+stops the release. `<tag>` is `v0.1.0-rc.2`; `<rc>` is the merged RC commit on
 `main`. Key material never enters a repository, agent session, report, or
 evidence log (RC-D3). `scripts/check-invariants.sh` family 17 pins the gate
-literals below.
+literals below. On the VM, `apksigner` and `zipalign`
+are `$ANDROID_HOME/build-tools/36.0.0/apksigner` and `…/zipalign`; `gh run` and
+`gh release` commands run outside the repository take `-R Titlan-chat/titlan`.
+
+## 0. Pre-tag device smoke
+
+The release trust path (RC-D7) is provable only on a device: the debug suites
+run under the CI test anchor and never reach the platform verifier (finding
+F-C, v0.1.0-rc.1). No tag until this section passes on the exact `<rc>`.
+
+- WHERE: VM titlan-dev — at `<rc>`:
+  `git switch --detach <rc> && REPRO_KEEP_DIR="$HOME/rc-smoke" scripts/repro-build.sh`
+  expect: `result: PASS`; `~/rc-smoke/app-release-unsigned.apk` present.
+- WHERE: VM titlan-dev — throwaway signature. NEVER the D4 key; the keystore
+  below is created and deleted in the same command:
+  `SMOKE=$(mktemp -d) && keytool -genkeypair -keystore "$SMOKE/smoke.p12" -storetype PKCS12 -alias smoke -keyalg RSA -keysize 2048 -validity 1 -dname CN=smoke -storepass smokesmoke -keypass smokesmoke && "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$SMOKE/smoke.p12" --ks-pass pass:smokesmoke --ks-key-alias smoke --out "$HOME/rc-smoke/titlan-smoke.apk" "$HOME/rc-smoke/app-release-unsigned.apk"; rm -rf "$SMOKE"`
+  expect: exit status `0`; `~/rc-smoke/titlan-smoke.apk` present.
+- WHERE: Windows — `scp` `titlan-smoke.apk` down; on one physical GrapheneOS
+  device and the AOSP emulator: uninstall any existing Titlan first
+  (`adb -s <serial> uninstall <applicationId>`), then
+  `adb -s <serial> install titlan-smoke.apk`.
+  expect: `Success` on both.
+- WHERE: devices — "Show pairing offer" on the emulator; scan it with the
+  physical device; no relay override anywhere.
+  expect: a QR on the emulator; `Paired — conversation established` on the
+  scanning device. Record both serials, `ro.build.fingerprint`, and the times.
+- WHERE: Windows — uninstall the smoke build from both devices (§8 needs fresh
+  installs of the D4-signed APK).
 
 ## 1. Pre-tag
 
@@ -44,11 +71,11 @@ literals below.
 - WHERE: VM titlan-dev — `git switch main && git pull --ff-only && git rev-parse HEAD`
   expect: `<rc>`.
 - WHERE: VM titlan-dev —
-  `git tag -a v0.1.0-rc.1 -m "Titlan v0.1.0-rc.1 (pre-release)"`
-  then `git rev-parse 'v0.1.0-rc.1^{commit}'`
+  `git tag -a v0.1.0-rc.2 -m "Titlan v0.1.0-rc.2 (pre-release)"`
+  then `git rev-parse 'v0.1.0-rc.2^{commit}'`
   expect: `<rc>`.
-- WHERE: VM titlan-dev — `git push origin v0.1.0-rc.1`
-  expect: a `[new tag]` line for `v0.1.0-rc.1 -> v0.1.0-rc.1`; no rejection
+- WHERE: VM titlan-dev — `git push origin v0.1.0-rc.2`
+  expect: a `[new tag]` line for `v0.1.0-rc.2 -> v0.1.0-rc.2`; no rejection
   by the ruleset.
 
 ## 3. release.yml
@@ -56,7 +83,7 @@ literals below.
 - WHERE: CI — the `Release artifacts` run for the tag.
   expect: conclusion `success`; its first step logged
   `release.yml triggered by <the maintainer's login>`.
-- WHERE: VM titlan-dev — `gh run download <run id> -n titlan-release-v0.1.0-rc.1 -D rc1 && cd rc1`
+- WHERE: VM titlan-dev — `gh run download <run id> -n titlan-release-v0.1.0-rc.2 -D rc2 && cd rc2`
   expect: `tezca-relay`, `titlan-android-unsigned.apk`, `tezca-core.cdx.json`,
   `tezca-relay.cdx.json`, `titlan-android-app.cdx.json`, `repro-report.txt`,
   `SHA256SUMS`.
@@ -79,7 +106,7 @@ literals below.
 ## 5. Independent rebuild
 
 - WHERE: VM titlan-dev — in the repository, at the tag, from the canonical
-  build path (docs/build.md): `git switch --detach v0.1.0-rc.1 && scripts/repro-build.sh`
+  build path (docs/build.md): `git switch --detach v0.1.0-rc.2 && scripts/repro-build.sh`
   expect: `result: PASS`.
 - WHERE: VM titlan-dev — compare the local `repro-report.txt` with the
   downloaded one.
@@ -123,14 +150,14 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
 
 - WHERE: VM titlan-dev — `gh attestation download titlan-<tag>-unsigned.apk --repo Titlan-chat/titlan`
   expect: exit status `0`; one `.jsonl` attestation bundle written.
-- WHERE: VM titlan-dev — `gh release create v0.1.0-rc.1 --prerelease --verify-tag`
+- WHERE: VM titlan-dev — `gh release create v0.1.0-rc.2 --prerelease --verify-tag`
   with the assets `titlan-<tag>.apk`, `titlan-<tag>-unsigned.apk`, the three
   SBOMs (`tezca-core.cdx.json`, `tezca-relay.cdx.json`,
   `titlan-android-app.cdx.json`), `repro-report.txt`, `SHA256SUMS`, and the
   attestation bundle. The release notes state: pre-release; not supported;
   pairing only (no conversation UI); and the `sha256sum titlan-<tag>.apk` line.
   expect: exit status `0`; the release URL is printed.
-- WHERE: GitHub — `gh release view v0.1.0-rc.1 --json isPrerelease,isDraft`
+- WHERE: GitHub — `gh release view v0.1.0-rc.2 --json isPrerelease,isDraft`
   expect: `"isPrerelease":true` and `"isDraft":false`.
 
 ## 8. Production-relay acceptance

@@ -35,6 +35,14 @@ pub mod storage;
 
 pub use error::CoreError;
 
+// Android only: link the JNI bootstrap for rustls-platform-verifier
+// (tezca-android-trust, 5d-3 PV-D2 as amended by R-B). A link-only use: the
+// crate's single exported symbol lands in this cdylib only if something here
+// names the crate. Nothing calls it, and this crate keeps its
+// #![forbid(unsafe_code)].
+#[cfg(target_os = "android")]
+use tezca_android_trust as _;
+
 uniffi::setup_scaffolding!();
 
 /// Crate-wide result type.

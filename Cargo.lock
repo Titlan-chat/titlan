@@ -2838,6 +2838,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tezca-android-trust"
+version = "0.1.0"
+dependencies = [
+ "jni",
+ "rustls-platform-verifier",
+]
+
+[[package]]
 name = "tezca-core"
 version = "0.1.0"
 dependencies = [
@@ -2856,6 +2864,7 @@ dependencies = [
  "signal-crypto",
  "subtle",
  "tempfile",
+ "tezca-android-trust",
  "thiserror",
  "tokio",
  "tokio-rustls",
