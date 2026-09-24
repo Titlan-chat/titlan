@@ -911,7 +911,7 @@ fi
 # proof is release-checklist §0 (a device), because the debug suites run under
 # the test anchor and never reach the platform path.
 pv_kt="titlan-android/app/src/main/kotlin/app/titlan/core/PlatformTrust.kt"
-pv_rs="tezca-core/src/platform_trust.rs"
+pv_rs="tezca-android-trust/src/lib.rs"
 pv_call='check(PlatformTrust.nativeInit(this)) { "platform trust init failed" }'
 pv_catalog="titlan-android/gradle/libs.versions.toml"
 pv_class='org/rustls/platformverifier/CertificateVerifier'
@@ -938,8 +938,8 @@ if [ ! -f "$pv_rs" ] || ! grep -qF 'Java_app_titlan_core_PlatformTrust_nativeIni
   echo "platform trust 18b: $pv_rs missing or lacks the JNI export / init_with_env call"
   fail=1
 fi
-if ! grep -qF '#[cfg(target_os = "android")]' tezca-core/src/lib.rs || ! grep -qF 'pub mod platform_trust;' tezca-core/src/lib.rs; then
-  echo "platform trust 18b: tezca-core/src/lib.rs must declare platform_trust under cfg(target_os = \"android\")"
+if ! grep -qF 'use tezca_android_trust as _;' tezca-core/src/lib.rs || ! grep -qF '#![forbid(unsafe_code)]' tezca-core/src/lib.rs; then
+  echo "platform trust 18b: tezca-core/src/lib.rs must link tezca-android-trust (a link-only use — the export is dropped from the cdylib otherwise) and keep #![forbid(unsafe_code)]"
   fail=1
 fi
 # 18c. The Android component is pinned to exactly the locked support-crate
@@ -977,6 +977,29 @@ if [ -f "$pv_apk" ]; then
 else
   echo "note: 18e dex scan skipped (no release APK at $pv_apk)"
 fi
+
+# 18f. The JNI seam crate is the workspace's ONLY unsafe_code allowance, and
+#      it is an attribute (#[unsafe(no_mangle)]), never a block: no unsafe
+#      block/fn/impl anywhere in-source, and the three original crates keep
+#      their crate-level forbid (ledger item 23; threat model words-amendment
+#      5d-3 R-B).
+pv_allow_hits=$(list_files | grep -E '(^|/)Cargo\.toml$' | xargs -r grep -lF 'unsafe_code = "allow"' 2>/dev/null | sort || true)
+if [ "$pv_allow_hits" != "tezca-android-trust/Cargo.toml" ]; then
+  echo "platform trust 18f: unsafe_code = \"allow\" must appear in exactly tezca-android-trust/Cargo.toml; found: ${pv_allow_hits:-<nowhere>}"
+  fail=1
+fi
+pv_unsafe_hits=$(list_files | grep -E '\.rs$' | xargs -r grep -nE 'unsafe \{|unsafe fn |unsafe impl ' 2>/dev/null || true)
+if [ -n "$pv_unsafe_hits" ]; then
+  echo "platform trust 18f: unsafe block/fn/impl found in-source (item 23 permits none):"
+  echo "$pv_unsafe_hits"
+  fail=1
+fi
+for pv_forbid_file in tezca-core/src/lib.rs tezca-relay/src/lib.rs uniffi-bindgen/src/main.rs; do
+  if ! grep -qF '#![forbid(unsafe_code)]' "$pv_forbid_file"; then
+    echo "platform trust 18f: $pv_forbid_file lost #![forbid(unsafe_code)] (ledger item 23)"
+    fail=1
+  fi
+done
 
 if [ "$fail" -ne 0 ]; then
   echo
