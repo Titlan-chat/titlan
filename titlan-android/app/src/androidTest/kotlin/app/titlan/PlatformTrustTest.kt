@@ -22,4 +22,11 @@ class PlatformTrustTest {
         // Throws ClassNotFoundException when the component is absent (rc.1).
         Class.forName("org.rustls.platformverifier.CertificateVerifier")
     }
+
+    @Test
+    fun nativeInitSucceedsAndIsIdempotent() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        org.junit.Assert.assertTrue(app.titlan.core.PlatformTrust.nativeInit(context))
+        org.junit.Assert.assertTrue(app.titlan.core.PlatformTrust.nativeInit(context))
+    }
 }

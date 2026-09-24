@@ -263,7 +263,7 @@ never guessed. **MITIGATED.** Venues: INV-4; `proto/envelope.md §Layer 1`,
 `tezca-core/src/pairing.rs :: mailbox_update_v1_with_trailing_bytes_is_malformed`,
 `tezca-core/src/pairing_v3_acceptance.rs :: r8_trailing_bytes_after_offer_sig_reject`;
 CI job "Fuzz — envelope + relay parsers (INV-4)" (four cargo-fuzz targets,
-90 s each, on every push and PR). Workspace-wide `#![forbid(unsafe_code)]`
+90 s each, on every push and PR). Crate-level `#![forbid(unsafe_code)]` in every crate that parses input (the `tezca-android-trust` JNI seam allows the lint for one symbol-export attribute and holds no unsafe block — check-invariants 18f)
 removes memory-unsafety from the parser threat class (ledger item 23, F1
 ADOPT-A; enforced by the compiler in
 CI job "Rust — fmt, clippy, build, test"). The pairing-specific frame
@@ -568,6 +568,13 @@ posture" line (ledger item 22); ledger item 24 ("release trust-anchor row
 exercised at 5d-2"). The relay's own TLS certificate is rotated by process
 restart (no hot reload) — `proto/relay-api.md §Resolved and open items`, a
 post-MVP operational item.
+
+On Android the platform verifier is live only once its bundled Kotlin
+component (`org.rustls.platformverifier`, pinned to the locked support crate)
+is packaged and the app hands it the application context at startup
+(`PlatformTrust.nativeInit`); both are asserted by check-invariants family 18
+and exercised by release-checklist §0 before every tag (5d-3, finding F-C:
+v0.1.0-rc.1 shipped without either and could not connect).
 
 ### TM-R7 — A malicious relay (integrity and availability)
 
@@ -955,8 +962,8 @@ toolchains are pinned (`rust-toolchain.toml`, a pinned NDK, a pinned nightly
 for fuzzing); release and relay artifacts are built twice and byte-compared;
 CycloneDX SBOMs are generated for core, relay, and the APK dependency
 closure; tagged builds carry a SLSA-style build-provenance attestation over
-the relay binary and the unsigned APK; `unsafe` is forbidden in-source in all
-three crates. **MITIGATED.** Venues: INV-6; INV-7; A2;
+the relay binary and the unsigned APK; `unsafe` is forbidden in-source in tezca-core, tezca-relay and uniffi-bindgen; the
+`tezca-android-trust` JNI seam holds no unsafe block (one symbol-export attribute, 18f). **MITIGATED.** Venues: INV-6; INV-7; A2;
 CI job "Rust — cargo deny + audit (INV-6/INV-7)";
 CI job "Reproducible build — double build + diff";
 CI job "SBOM — CycloneDX (core, relay, APK deps)";

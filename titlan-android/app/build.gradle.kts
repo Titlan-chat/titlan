@@ -69,6 +69,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Keep rule for the platform-verifier component (5d-3, PV-D2): inert
+            // while minify is off; guards a future flip (check-invariants 18d).
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // No signingConfig on purpose: CI produces UNSIGNED release APKs.
             // Signing keys are external to the repo and to CI — see README
             // "Release signing".
@@ -247,6 +250,9 @@ dependencies {
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
+    // rustls-platform-verifier's Android component (5d-3, PV-D1a) — see
+    // settings.gradle.kts for where it is resolved from.
+    implementation(libs.rustls.platform.verifier)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.runner)
