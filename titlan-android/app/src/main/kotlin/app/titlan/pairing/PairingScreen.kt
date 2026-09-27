@@ -24,11 +24,14 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -42,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -92,7 +96,7 @@ fun PairingScreen() {
     val scope = rememberCoroutineScope()
 
     Column(
-        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp),
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -163,7 +167,16 @@ private fun OfferSection(offer: PairingOffer, onExpired: () -> Unit, onDismiss: 
     }
 
     Text("Scan this to pair", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-    Image(bitmap = qr.asImageBitmap(), contentDescription = "Pairing QR code")
+    // F-D (checklist §0, 2026-09-26): the bitmap is 1 px per module, so drawn
+    // at its intrinsic size a near-capacity offer is ~0.4 in on a phone. Fill
+    // the width, keep it square, and upscale nearest-neighbour so the modules
+    // stay crisp for the scanning camera.
+    Image(
+        bitmap = qr.asImageBitmap(),
+        contentDescription = "Pairing QR code",
+        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+        filterQuality = FilterQuality.None,
+    )
     Text(QrCodec.encodeLink(offer.bytes))
     val remainingMinutes =
         ((offer.expiresAtEpochMillis - System.currentTimeMillis()) / 60_000L).coerceAtLeast(0)
@@ -315,7 +328,15 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
             text = stringResource(R.string.pairing_link_path_security),
             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
         )
-        OutlinedTextField(value = pasted, onValueChange = { pasted = it }, modifier = Modifier.fillMaxWidth())
+        // F-E (checklist §0, 2026-09-26): single-line, so a 2.7 KB link scrolls
+        // horizontally instead of growing the field ~70 lines and pushing the
+        // button off-screen (and Enter/Tab never become text).
+        OutlinedTextField(
+            value = pasted,
+            onValueChange = { pasted = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
         Button(onClick = {
             // A malformed paste must not crash the screen — it is a decode
             // failure, so it surfaces the MALFORMED class copy directly.

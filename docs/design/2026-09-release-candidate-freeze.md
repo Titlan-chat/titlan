@@ -196,3 +196,13 @@ Base of the findings: titlan `main` `0ea1f505b61f1e9715eb1b4a0bbc18839aa65694`.
   pins and the debug test anchor are unchanged. Unit
   `5d-4 release-trust-webpki`; gate `p5-5d4-release-trust-webpki-gate.md`
   (sha256 fb501a8ac63e6294265a3102a18348b43e6acef603fd5d25f980029664553567).
+- **F-D / F-E / F-F (2026-09-26, checklist §0 at `a5385e9`):** the rc.2
+  candidate minted offers on Pixel 9 and the emulator (the RC-D7 amendment is
+  proven on device) but could not pair: the WebSocket connector passed a
+  port-less authority to `TcpStream::connect` (F-F — no subscription ever
+  succeeded against `wss://relay.titlan.chat`, so no pairing handoff and no
+  message receipt; every suite used an explicit port), the QR was drawn at
+  1 px per module (F-D), and the link-paste field outgrew the screen (F-E).
+  No frozen decision changes. Unit `5d-5 pairing-on-device`; §0 now requires
+  pairing in both directions. Gate `p5-5d5-pairing-on-device-gate.md`
+  (sha256 de0220b06953756260ca713c5f2dfd1ad41b93215651d2f1c31b92fc9501485e).

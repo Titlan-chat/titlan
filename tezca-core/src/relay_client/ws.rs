@@ -52,7 +52,7 @@ pub(crate) async fn subscribe(
     let host = authority.split(':').next().unwrap_or(authority).to_string();
     let ws_url = format!("{relay_url}/v1/mailboxes/{mailbox_id}/ws");
 
-    let Ok(tcp) = TcpStream::connect(authority).await else {
+    let Ok(tcp) = TcpStream::connect(socket_authority(scheme, authority)).await else {
         return Connected::Unreachable;
     };
 
@@ -108,6 +108,22 @@ impl Subscription {
     }
 }
 
+/// The `host:port` a relay URL's authority resolves to for `TcpStream::connect`:
+/// an explicit port is kept, otherwise the scheme's default (443 for `wss`, 80
+/// for `ws`). Finding F-F (release-checklist §0, 2026-09-26): the production
+/// default `wss://relay.titlan.chat` carries no port, and
+/// `TcpStream::connect("relay.titlan.chat")` fails as an invalid socket
+/// address before any I/O — every WebSocket subscription failed, so no
+/// pairing handoff and no message receipt. Single site (check-invariants 19a).
+fn socket_authority(scheme: &str, authority: &str) -> String {
+    if authority.contains(':') {
+        authority.to_owned()
+    } else {
+        let port = if scheme == "wss" { 443 } else { 80 };
+        format!("{authority}:{port}")
+    }
+}
+
 /// Installs the ring crypto provider as the process default (idempotent).
 /// Required by reqwest's `rustls-no-provider` and by our wss client config.
 pub(crate) fn install_ring_provider() {
@@ -131,4 +147,36 @@ pub(crate) fn build_http_client() -> Result<reqwest::Client> {
         .use_preconfigured_tls(config)
         .build()
         .map_err(|e| CoreError::Network(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::ToSocketAddrs;
+
+    #[test]
+    fn socket_authority_defaults_wss_to_443() {
+        assert_eq!(
+            socket_authority("wss", "relay.titlan.chat"),
+            "relay.titlan.chat:443"
+        );
+    }
+
+    #[test]
+    fn socket_authority_defaults_ws_to_80() {
+        assert_eq!(socket_authority("ws", "relay.local"), "relay.local:80");
+    }
+
+    #[test]
+    fn socket_authority_keeps_explicit_port() {
+        assert_eq!(socket_authority("wss", "10.0.0.32:8443"), "10.0.0.32:8443");
+        assert_eq!(socket_authority("ws", "127.0.0.1:41234"), "127.0.0.1:41234");
+    }
+
+    #[test]
+    fn bare_authority_is_not_a_socket_address() {
+        // The pre-5d-5 failure mode, pinned: no port, no socket address, no I/O.
+        assert!("relay.titlan.chat".to_socket_addrs().is_err());
+        assert!("127.0.0.1:443".to_socket_addrs().is_ok());
+    }
 }
