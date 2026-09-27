@@ -18,7 +18,10 @@ are `$ANDROID_HOME/build-tools/36.0.0/apksigner` and `…/zipalign`; `gh run` an
 
 The release trust path (RC-D7) is provable only on a device: the debug suites
 run under the CI test anchor and never reach the platform verifier (finding
-F-C, v0.1.0-rc.1). No tag until this section passes on the exact `<rc>`.
+F-C, v0.1.0-rc.1). The pairing handshake is device-only for the same reason:
+finding F-F (2026-09-26) — a port-less relay URL made every WebSocket
+subscription fail — passed every suite because no suite uses a port-less URL.
+No tag until this section passes on the exact `<rc>`, in BOTH directions.
 
 - WHERE: VM titlan-dev — at `<rc>`:
   `git switch --detach <rc> && REPRO_KEEP_DIR="$HOME/rc-smoke" scripts/repro-build.sh`
@@ -32,10 +35,21 @@ F-C, v0.1.0-rc.1). No tag until this section passes on the exact `<rc>`.
   (`adb -s <serial> uninstall <applicationId>`), then
   `adb -s <serial> install titlan-smoke.apk`.
   expect: `Success` on both.
-- WHERE: devices — "Show pairing offer" on the emulator; scan it with the
-  physical device; no relay override anywhere.
-  expect: a QR on the emulator; `Paired — conversation established` on the
-  scanning device. Record both serials, `ro.build.fingerprint`, and the times.
+- WHERE: devices — pairing in BOTH directions, no relay override anywhere.
+  The offerer has no on-screen completion signal (`OfferSection` only expires
+  or dismisses); the responder's `Paired — conversation established` line is
+  the evidence each way. Grant the camera permission on the physical device
+  when asked.
+  Direction A (QR, F-D): "Show pairing offer" on the emulator; scan the QR
+  with the physical device's camera — no link paste.
+  expect: a QR filling the emulator's width; `Paired — conversation
+  established` on the physical device within 60 s of the scan.
+  Direction B (link, F-E/F-F): "Show pairing offer" on the physical device;
+  paste its `titlan://pair#` link into the emulator's paste field
+  (`adb shell input text` is acceptable) and tap "Pair from link".
+  expect: `Paired — conversation established` on the emulator within 60 s.
+  Record both serials, `ro.build.fingerprint`, and the times of each
+  direction.
 - WHERE: Windows — uninstall the smoke build from both devices (§8 needs fresh
   installs of the D4-signed APK).
 

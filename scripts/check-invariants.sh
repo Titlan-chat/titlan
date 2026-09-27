@@ -1005,9 +1005,60 @@ if ! grep -qF 'RC-D7 (2026-09-24' docs/design/2026-09-release-candidate-freeze.m
   fail=1
 fi
 
+# --- 19. Pairing on device (5d-5, findings F-D / F-E / F-F) -------------------
+# Checklist §0 at the v0.1.0-rc.2 candidate a5385e9 (2026-09-26): both devices
+# minted offers (RC-D7 as amended is proven on device) but could not pair. The
+# WebSocket connector passed a port-less authority to TcpStream::connect (F-F:
+# no subscription ever succeeded against wss://relay.titlan.chat, so no pairing
+# handoff and no message receipt — every suite used an explicit port), the QR
+# was drawn at 1 px per module (F-D), and the link-paste field outgrew the
+# screen with no scrolling (F-E). Static gates 19a–19e; the dynamic proof is
+# release-checklist §0 in both directions.
+pd_ws="tezca-core/src/relay_client/ws.rs"
+pd_screen="titlan-android/app/src/main/kotlin/app/titlan/pairing/PairingScreen.kt"
+# 19a. F-F: one authority-derivation site feeds TcpStream::connect, and the
+#      four tests that pin its contract exist.
+if ! grep -qF 'fn socket_authority(scheme: &str, authority: &str) -> String' "$pd_ws"; then
+  echo "pairing on device 19a: $pd_ws lacks socket_authority()"
+  fail=1
+fi
+if ! grep -qF 'TcpStream::connect(socket_authority(scheme, authority))' "$pd_ws"; then
+  echo "pairing on device 19a: $pd_ws must connect through socket_authority(scheme, authority)"
+  fail=1
+fi
+pd_tests=$(grep -cE 'fn socket_authority_(defaults_wss_to_443|defaults_ws_to_80|keeps_explicit_port)\(|fn bare_authority_is_not_a_socket_address\(' "$pd_ws" || true)
+if [ "$pd_tests" -ne 4 ]; then
+  echo "pairing on device 19a: $pd_ws must carry the four socket-authority tests (found $pd_tests)"
+  fail=1
+fi
+# 19b. F-D: the QR fills the width, stays square, and upscales nearest-neighbour.
+if ! grep -qF 'modifier = Modifier.fillMaxWidth().aspectRatio(1f),' "$pd_screen" || ! grep -qF 'filterQuality = FilterQuality.None,' "$pd_screen"; then
+  echo "pairing on device 19b: $pd_screen must size the QR (fillMaxWidth().aspectRatio(1f)) and draw it with FilterQuality.None"
+  fail=1
+fi
+# 19c. F-E: the pairing column scrolls and the paste field is single-line.
+if ! grep -qF '.verticalScroll(rememberScrollState())' "$pd_screen"; then
+  echo "pairing on device 19c: $pd_screen pairing column must be verticalScroll(rememberScrollState())"
+  fail=1
+fi
+if ! grep -qF 'singleLine = true,' "$pd_screen"; then
+  echo "pairing on device 19c: $pd_screen paste field must be singleLine = true"
+  fail=1
+fi
+# 19d. The checklist proves pairing in both directions before a tag.
+if ! grep -qF 'Direction A (QR, F-D)' docs/release-checklist.md || ! grep -qF 'Direction B (link, F-E/F-F)' docs/release-checklist.md; then
+  echo "pairing on device 19d: docs/release-checklist.md §0 must carry Direction A (QR, F-D) and Direction B (link, F-E/F-F)"
+  fail=1
+fi
+# 19e. The freeze records the findings.
+if ! grep -qF 'F-D / F-E / F-F (2026-09-26' docs/design/2026-09-release-candidate-freeze.md; then
+  echo "pairing on device 19e: the RC freeze lacks the F-D / F-E / F-F amendment entry"
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4), pairing on device (5d-5))."
