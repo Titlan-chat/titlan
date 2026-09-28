@@ -66,4 +66,9 @@ object PairingFailure {
 
     /** User copy for a caught pairing-flow failure. */
     fun userMessage(t: Throwable): String = userMessage(classify(t))
+
+    /** 5e-1 (CU-D9): the class's string resource; resolved at the call site. */
+    fun userMessageRes(cls: PairingFailureClass): Int = TODO()
+    /** 5e-1 (CU-D9): the resource for a caught pairing-flow failure. */
+    fun userMessageRes(t: Throwable): Int = TODO()
 }
