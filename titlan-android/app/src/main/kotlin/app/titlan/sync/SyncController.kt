@@ -96,8 +96,8 @@ object SyncController {
  * observer being attached; the UI reads the store when it next opens, and its
  * live observers replace this sink via [SyncController.start]. This is a
  * delivery-continuity sink, not a UI decision — since 5e-1 the UI sink is
- * [app.titlan.conversation.ConversationStore], and it re-registers on every
- * Activity start.
+ * [app.titlan.conversation.ConversationStore], registered at Activity
+ * creation and at every pairing completion.
  */
 private object DefaultSyncEvents : SyncEvents {
     override fun onMessageArrived(conversationId: ByteArray, messageId: ByteArray) = Unit
