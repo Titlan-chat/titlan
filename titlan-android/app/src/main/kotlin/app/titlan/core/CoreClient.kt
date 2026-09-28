@@ -129,7 +129,17 @@ private class FfiCoreClient(private val ffi: FfiClient) : CoreClient {
     override fun sendChat(conversationId: ByteArray, text: String) =
         ffi.sendChat(conversationId, text)
 
-    override fun messages(conversationId: ByteArray): List<StoredChatMessage> = TODO()
+    override fun messages(conversationId: ByteArray): List<StoredChatMessage> =
+        ffi.messages(conversationId).map { m ->
+            StoredChatMessage(
+                id = m.id,
+                conversationId = m.conversationId,
+                incoming = m.incoming,
+                payloadType = m.payloadType.toInt(),
+                typeVersion = m.typeVersion.toInt(),
+                body = m.body,
+            )
+        }
 
     override fun startSync(events: SyncEvents) =
         ffi.startSync(ObserverAdapter(events), ReceiverAdapter(events))

@@ -4,6 +4,7 @@
 package app.titlan.conversation
 
 import android.content.Context
+import app.titlan.sync.SyncController
 
 /**
  * What both roles do once a pairing has completed (5e-1, CU-D5/CU-D8):
@@ -13,5 +14,10 @@ import android.content.Context
  * Never called from a sync callback (CU-D3 callback rule).
  */
 object PairingCompletion {
-    suspend fun complete(context: Context, conversationId: ByteArray): ConversationKey = TODO()
+    suspend fun complete(context: Context, conversationId: ByteArray): ConversationKey {
+        val key = ConversationKey.of(conversationId)
+        ConversationStore.refreshConversations()
+        SyncController.start(context.applicationContext, ConversationStore.events)
+        return key
+    }
 }

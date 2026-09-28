@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.os.UserManager
+import app.titlan.R
 
 /**
  * The always-on receive-sync foreground service (frozen design §1, §7). Thin
@@ -18,7 +19,7 @@ import android.os.UserManager
  * tezca-core sync engine via [SyncController]. No protocol logic (A3).
  *
  * The notification is deliberately content-free (frozen design §7): fixed text
- * [NOTIFICATION_TEXT], zero metadata, zero dynamic state, `VISIBILITY_SECRET`
+ * (`R.string.sync_notification_title`), zero metadata, zero dynamic state, `VISIBILITY_SECRET`
  * (hidden on the lock screen), and the lowest platform-honored importance
  * (`IMPORTANCE_MIN`, no sound/peek). `foregroundServiceType` is declared in the
  * manifest as `specialUse` (frozen design §6 default until remoteMessaging is
@@ -62,7 +63,7 @@ class SyncService : Service() {
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            NOTIFICATION_TEXT,
+            getString(R.string.sync_notification_title),
             NotificationManager.IMPORTANCE_MIN,
         ).apply {
             setShowBadge(false)
@@ -75,7 +76,7 @@ class SyncService : Service() {
 
     private fun buildNotification(): Notification =
         Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle(NOTIFICATION_TEXT)
+            .setContentTitle(getString(R.string.sync_notification_title))
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setOngoing(true)
             .setShowWhen(false)
@@ -90,10 +91,9 @@ class SyncService : Service() {
         /** Fixed FGS notification id. */
         private const val NOTIFICATION_ID = 1
 
-        /**
-         * Fixed FGS notification text (frozen design §7): zero metadata, zero
-         * dynamic state, VISIBILITY_SECRET, lowest platform-honored importance.
-         */
-        const val NOTIFICATION_TEXT = "Titlan sync active"
+        // The fixed FGS notification text (frozen design §7: zero metadata,
+        // zero dynamic state, VISIBILITY_SECRET, lowest platform-honored
+        // importance) is R.string.sync_notification_title, whose value is the
+        // former literal, unchanged (5e-1, CU-D9; check-invariants family 20e).
     }
 }

@@ -3,6 +3,11 @@
 
 package app.titlan.conversation
 
+import app.titlan.core.AppCore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+
 /**
  * The offerer completion signal (5e-1, CU-D4): while an offer is Active the
  * store is polled every [DEFAULT_POLL_MILLIS] on IO and the first
@@ -22,5 +27,15 @@ object OfferWatcher {
         before: Set<ConversationKey>,
         deadlineEpochMillis: Long,
         pollMillis: Long = DEFAULT_POLL_MILLIS,
-    ): ConversationKey? = TODO()
+    ): ConversationKey? {
+        while (true) {
+            val now = System.currentTimeMillis()
+            if (now >= deadlineEpochMillis) return null
+            val keys = withContext(Dispatchers.IO) {
+                AppCore.get().listConversations().map { ConversationKey.of(it) }
+            }
+            keys.firstOrNull { it !in before }?.let { return it }
+            delay(minOf(pollMillis, deadlineEpochMillis - now).coerceAtLeast(1L))
+        }
+    }
 }

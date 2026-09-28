@@ -36,20 +36,41 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
   `adb -s <serial> install titlan-smoke.apk`.
   expect: `Success` on both.
 - WHERE: devices — pairing in BOTH directions, no relay override anywhere.
-  The offerer has no on-screen completion signal (`OfferSection` only expires
-  or dismisses); the responder's `Paired — conversation established` line is
-  the evidence each way. Grant the camera permission on the physical device
-  when asked.
+  Since 5e-1 both roles land on the conversation screen: the responder's
+  screen and, within 10 s of it, the offerer's (which leaves the QR on its
+  own) each show `Paired — conversation established`; that line is the
+  evidence each way. Grant the camera permission on the physical device
+  persistently when asked (a one-time grant lapses before the next scan).
+  After a host sleep, mint an offer in-app before any device step (the
+  finding F-G rule: the emulator's network can look validated and be dead).
   Direction A (QR, F-D): "Show pairing offer" on the emulator; scan the QR
   with the physical device's camera — no link paste.
   expect: a QR filling the emulator's width; `Paired — conversation
-  established` on the physical device within 60 s of the scan.
-  Direction B (link, F-E/F-F): "Show pairing offer" on the physical device;
-  paste its `titlan://pair#` link into the emulator's paste field
-  (`adb shell input text` is acceptable) and tap "Pair from link".
-  expect: `Paired — conversation established` on the emulator within 60 s.
+  established` on the physical device within 60 s of the scan, and on the
+  emulator within 10 s after that.
+  Direction B (link, F-E/F-F): "Pair a device", then "Show pairing offer" on
+  the physical device; paste its `titlan://pair#` link into the emulator's
+  paste field (`adb shell input text` is acceptable) and tap "Pair from link".
+  expect: `Paired — conversation established` on the emulator within 60 s,
+  and on the physical device within 10 s after that.
   Record both serials, `ro.build.fingerprint`, and the times of each
   direction.
+- WHERE: devices — Message exchange (5e-1), in the conversation Direction B
+  created. Type the literal `titlan message A to B` on the physical device
+  and tap Send; type the literal `titlan message B to A` on the emulator and
+  tap Send.
+  expect: each message appears on the other device within 30 s of Send —
+  right-aligned on the sender, left-aligned on the receiver.
+- WHERE: devices — Airplane-mode round trip (5e-1). Airplane mode ON on the
+  physical device (quick settings, or
+  `adb -s <serial> shell cmd connectivity airplane-mode enable`); type the
+  literal `titlan message offline` and tap Send — it appears in the sender's
+  list; then airplane mode OFF (`… airplane-mode disable`).
+  expect: `titlan message offline` appears on the emulator within 60 s of
+  airplane mode going off.
+- WHERE: Windows — logcat hygiene, both devices:
+  `adb -s <serial> logcat -d | findstr /c:"titlan message"`
+  expect: no output on either device (INV-1: no message text in logcat).
 - WHERE: Windows — uninstall the smoke build from both devices (§8 needs fresh
   installs of the D4-signed APK).
 
@@ -184,6 +205,18 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
   (the release default; no override).
   expect: both devices reach the pairing-complete state. Record the start and
   completion times.
+- WHERE: devices — Message exchange (5e-1), in the conversation just paired:
+  the literal `titlan message A to B` sent from the first device, the literal
+  `titlan message B to A` sent from the second.
+  expect: each appears on the other device within 30 s of Send.
+- WHERE: devices — Airplane-mode round trip (5e-1): airplane mode ON on one
+  device, the literal `titlan message offline` sent from it, airplane mode
+  OFF.
+  expect: `titlan message offline` appears on the other device within 60 s of
+  airplane mode going off.
+- WHERE: Windows — logcat hygiene, both devices:
+  `adb -s <serial> logcat -d | findstr /c:"titlan message"`
+  expect: no output on either device (INV-1: no message text in logcat).
 
 ## 9. Post-publish
 

@@ -13,6 +13,5 @@ package app.titlan.conversation
  * message in that conversation — so the UI never hands core one.
  */
 object ChatLimits {
-    val MAX_CHAT_UTF8_BYTES: Int
-        get() = TODO()
+    const val MAX_CHAT_UTF8_BYTES = 8186
 }

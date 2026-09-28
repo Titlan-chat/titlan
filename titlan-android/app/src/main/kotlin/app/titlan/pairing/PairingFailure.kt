@@ -3,6 +3,7 @@
 
 package app.titlan.pairing
 
+import app.titlan.R
 import uniffi.tezca_core.TitlanException
 
 /**
@@ -21,7 +22,7 @@ enum class PairingFailureClass {
 
 /**
  * Maps a pairing-flow failure to its [PairingFailureClass] and user-facing
- * dialog copy — the four-way vocabulary that replaced the 4b-3 unified
+ * dialog copy (a string resource since 5e-1) — the four-way vocabulary that replaced the 4b-3 unified
  * dialog. A3: classification rides the typed [TitlanException] variants the
  * core surfaces — never string inspection.
  */
@@ -45,30 +46,20 @@ object PairingFailure {
     }
 
     /**
-     * User copy per class. The EXPIRED copy is the frozen §5 wording
-     * VERBATIM (V3-D2: one surface for both expiry details); the other
-     * strings are drafted by 5a-2 and enumerated in its report for
-     * maintainer copy-review — their DISTINCTNESS and class-correctness are
-     * what the tests freeze, not their wording.
+     * The class's string resource (5e-1, CU-D9: every user-visible string is
+     * a resource; the plain-JVM CopyConventionTest pins the frozen EXPIRED
+     * wording verbatim in strings.xml and the four-way DISTINCTNESS here).
+     * The EXPIRED resource is the pair-offer v3 freeze §5 wording VERBATIM
+     * (V3-D2: one surface for both expiry details).
      */
-    fun userMessage(cls: PairingFailureClass): String = when (cls) {
-        PairingFailureClass.NETWORK_UNREACHABLE ->
-            "Can't reach the relay — check this device's connection and try again."
-        PairingFailureClass.EXPIRED ->
-            "offer expired or not yet valid — check both devices' clocks, then re-mint"
-        PairingFailureClass.MALFORMED ->
-            "That code isn't a valid pairing offer — re-scan it, or mint a fresh one on the other device."
-        PairingFailureClass.CRYPTO ->
-            "Pairing failed a cryptographic check — stop and mint a fresh offer on the other device."
-        PairingFailureClass.INTERNAL ->
-            "Pairing failed from an internal error on this device — try again."
+    fun userMessageRes(cls: PairingFailureClass): Int = when (cls) {
+        PairingFailureClass.NETWORK_UNREACHABLE -> R.string.pairing_failure_network
+        PairingFailureClass.EXPIRED -> R.string.pairing_failure_expired
+        PairingFailureClass.MALFORMED -> R.string.pairing_failure_malformed
+        PairingFailureClass.CRYPTO -> R.string.pairing_failure_crypto
+        PairingFailureClass.INTERNAL -> R.string.pairing_failure_internal
     }
 
-    /** User copy for a caught pairing-flow failure. */
-    fun userMessage(t: Throwable): String = userMessage(classify(t))
-
-    /** 5e-1 (CU-D9): the class's string resource; resolved at the call site. */
-    fun userMessageRes(cls: PairingFailureClass): Int = TODO()
-    /** 5e-1 (CU-D9): the resource for a caught pairing-flow failure. */
-    fun userMessageRes(t: Throwable): Int = TODO()
+    /** The resource for a caught pairing-flow failure. */
+    fun userMessageRes(t: Throwable): Int = userMessageRes(classify(t))
 }
