@@ -46,9 +46,10 @@ object SyncController {
 
     /**
      * Launch-time start (4b2-WO-launch-sync): starts receive-sync with no UI
-     * observer, resuming with the inert [DefaultSyncEvents] sink. In 4b-2 the UI
-     * is [app.titlan.pairing.PairingScreen] with no sync observer (observer
-     * wiring is 4b-3), so this is the same no-observer case as a START_STICKY
+     * observer, resuming with the inert [DefaultSyncEvents] sink. Since 5e-1
+     * MainActivity starts sync with the UI sink
+     * ([app.titlan.conversation.ConversationStore]); this form remains for the
+     * no-observer case, the same as a START_STICKY
      * revival (C2-D1) and safe for the same reason: core acks the relay only
      * after durable persist (frozen §1), so delivery never depends on an
      * attached observer. This is the SAME entry as the canonical [start] —
@@ -94,8 +95,9 @@ object SyncController {
  * core acks the relay only after durable persist, so no message depends on an
  * observer being attached; the UI reads the store when it next opens, and its
  * live observers replace this sink via [SyncController.start]. This is a
- * delivery-continuity sink, not a UI decision — 4b-3 owns what the UI does
- * with events.
+ * delivery-continuity sink, not a UI decision — since 5e-1 the UI sink is
+ * [app.titlan.conversation.ConversationStore], and it re-registers on every
+ * Activity start.
  */
 private object DefaultSyncEvents : SyncEvents {
     override fun onMessageArrived(conversationId: ByteArray, messageId: ByteArray) = Unit

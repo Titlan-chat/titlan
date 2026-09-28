@@ -17,8 +17,9 @@ import org.junit.runner.RunWith
  *
  * Green plan (4b-1): a TitlanApp [android.app.Application] registers
  * ActivityLifecycleCallbacks that set FLAG_SECURE in onActivityPreCreated
- * for EVERY activity — central enforcement, so activities added in 4b-3
- * cannot opt out by omission. This test asserts the resulting window state.
+ * for EVERY activity — central enforcement, so any activity added later
+ * cannot opt out by omission (5e-1 kept the single-Activity shape, CU-D2).
+ * This test asserts the resulting window state.
  */
 @RunWith(AndroidJUnit4::class)
 class FlagSecureTest {

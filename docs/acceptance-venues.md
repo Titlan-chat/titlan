@@ -89,12 +89,25 @@ duplicates the other.
   field is reachable only via the camera-permission-denied trigger; with a
   ~2.6 KB link pasted its accept button sits off-screen; the screen does not
   scroll; keyevent 66 / 61+66 do not submit.
+  **RESOLVED — landed in 5d-5 (PR #69, 2026-09-27); annotated here in 5e-1.**
+  Finding F-E (2026-09-26): the pairing column scrolls and the paste field is
+  single-line, so the accept button stays on screen for a 2.7 KB link; the
+  path is also reachable through the 20 s decode timeout. Enter does not
+  submit by design — tap "Pair from link" (a dated observation, not an item).
 - **Blank post-pairing screen (4b-3, recorded 2026-07-28).** Pairing success
   renders only a status line; there is no conversation-list navigation.
+  **RESOLVED — landed in 5e-1 (`docs/design/2026-09-conversation-ui-freeze.md`
+  CU-D4/CU-D5).** Pairing success opens the conversation screen for both
+  roles; the offerer, which had no completion signal at all, learns of the
+  completion by polling its own conversation list while the offer is shown.
 - **Swallowed peek failure (4b-3, recorded 2026-07-28).**
   `PairingScreen.kt:357-358` wraps `peekOfferRelay` in
   `runCatching{}.getOrNull()` — the first core touch on the scan path, with
   every failure silently swallowed. Surface or log-gate the failure.
+  **RESOLVED — landed in 5e-1 (rider R-1).** A `peekOfferRelay` failure now
+  surfaces its classified copy (MALFORMED for a structurally invalid offer,
+  INTERNAL for a device-local fault) and re-arms the scanner instead of
+  proceeding to establish; nothing on the scan path is swallowed.
 - **Bounded network-I/O timeouts (Phase 5 hardening, recorded 2026-07-28).**
   No timeouts are configured on relay HTTP/WS operations, so a joined
   `stop_sync` landing during a control frame's shielded network leg waits on
