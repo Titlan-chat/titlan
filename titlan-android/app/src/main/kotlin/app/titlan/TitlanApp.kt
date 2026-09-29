@@ -14,7 +14,7 @@ import app.titlan.core.AppCore
  * Application entry point. Central FLAG_SECURE enforcement
  * (maintainer-confirmed: always-on for MVP, no toggle, no debug exemption):
  * every activity gets FLAG_SECURE in onActivityPreCreated — before the
- * window is first drawn — so activities added later (4b-3) cannot opt out
+ * window is first drawn — so any activity added later cannot opt out
  * by omission. Suppresses screenshots and recents thumbnails (INV-1's
  * screen surface).
  */

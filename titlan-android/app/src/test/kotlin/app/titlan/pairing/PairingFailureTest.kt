@@ -3,6 +3,7 @@
 
 package app.titlan.pairing
 
+import app.titlan.R
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -14,10 +15,16 @@ import uniffi.tezca_core.TitlanException
 /**
  * 5a-2 red suite: pins the four-way pairing-failure vocabulary (P5-D2,
  * ratified 2026-08-05; pair-offer v3 freeze §5 seam) end to end at the
- * Kotlin dialog mapper — class correctness, four DISTINCT user strings, the
+ * Kotlin dialog mapper — class correctness, four DISTINCT user surfaces, the
  * frozen expired copy VERBATIM, the negative pins (signature never surfaces
  * as expired; the structural family never as crypto), and the 4b-3 unified
  * "stale or malformed" dialog pinned DEAD in app sources.
+ *
+ * 5e-1 (FLAG-2 discharged, freeze CU-D9): the surfaces are string RESOURCES
+ * — [PairingFailure.userMessageRes] maps a class to its resource id, and the
+ * frozen wording is asserted where it now lives, in strings.xml, read off the
+ * repo tree. Distinctness and class-correctness are what this suite freezes;
+ * the wording of the non-frozen strings is not.
  *
  * Plain-JVM on purpose (the CI "Android — lint, unit tests" job): the
  * generated [TitlanException] subclasses are plain data carriers,
@@ -87,31 +94,36 @@ class PairingFailureTest {
     }
 
     @Test
-    fun fourClassesProduceFourDistinctUserStrings() {
-        val strings = listOf(
-            PairingFailure.userMessage(PairingFailureClass.NETWORK_UNREACHABLE),
-            PairingFailure.userMessage(PairingFailureClass.EXPIRED),
-            PairingFailure.userMessage(PairingFailureClass.MALFORMED),
-            PairingFailure.userMessage(PairingFailureClass.CRYPTO),
+    fun fourClassesProduceFourDistinctResources() {
+        val ids = listOf(
+            PairingFailure.userMessageRes(PairingFailureClass.NETWORK_UNREACHABLE),
+            PairingFailure.userMessageRes(PairingFailureClass.EXPIRED),
+            PairingFailure.userMessageRes(PairingFailureClass.MALFORMED),
+            PairingFailure.userMessageRes(PairingFailureClass.CRYPTO),
         )
         assertEquals(
-            "the four classes must produce four DISTINCT user strings, got $strings",
+            "the four classes must map to four DISTINCT resources, got $ids",
             4,
-            strings.toSet().size,
+            ids.toSet().size,
         )
     }
 
     @Test
     fun expiredStringIsTheFrozenCopyVerbatim() {
         assertEquals(
-            "the expired surface must be the frozen §5 copy VERBATIM",
+            "the expired surface (strings.xml pairing_failure_expired) must be the frozen §5 copy VERBATIM",
             frozenExpiredCopy,
-            PairingFailure.userMessage(expired(FfiOfferExpiryDetail.EXPIRED)),
+            resourceValue("pairing_failure_expired"),
+        )
+        assertEquals(
+            "Expired must resolve to the frozen surface",
+            R.string.pairing_failure_expired,
+            PairingFailure.userMessageRes(expired(FfiOfferExpiryDetail.EXPIRED)),
         )
         assertEquals(
             "NotYetValid shares the one frozen surface (V3-D2)",
-            frozenExpiredCopy,
-            PairingFailure.userMessage(expired(FfiOfferExpiryDetail.NOT_YET_VALID)),
+            R.string.pairing_failure_expired,
+            PairingFailure.userMessageRes(expired(FfiOfferExpiryDetail.NOT_YET_VALID)),
         )
     }
 
@@ -124,8 +136,8 @@ class PairingFailureTest {
         )
         assertNotEquals(
             "the crypto dialog must not read as the expired dialog",
-            PairingFailure.userMessage(expired(FfiOfferExpiryDetail.EXPIRED)),
-            PairingFailure.userMessage(TitlanException.OfferSignatureInvalid()),
+            PairingFailure.userMessageRes(expired(FfiOfferExpiryDetail.EXPIRED)),
+            PairingFailure.userMessageRes(TitlanException.OfferSignatureInvalid()),
         )
     }
 
@@ -142,8 +154,8 @@ class PairingFailureTest {
         assertNotEquals("never CRYPTO", PairingFailureClass.CRYPTO, cls)
         assertNotEquals(
             "the malformed dialog must not read as the crypto dialog",
-            PairingFailure.userMessage(PairingFailureClass.CRYPTO),
-            PairingFailure.userMessage(PairingFailureClass.MALFORMED),
+            PairingFailure.userMessageRes(PairingFailureClass.CRYPTO),
+            PairingFailure.userMessageRes(PairingFailureClass.MALFORMED),
         )
     }
 
@@ -160,6 +172,22 @@ class PairingFailureTest {
                 "sources (the four-way vocabulary replaced it), found in: $offenders",
             offenders.isEmpty(),
         )
+    }
+
+    /**
+     * One strings.xml value read off the repo tree, with exactly one enclosing
+     * double-quote pair stripped (the Android form that keeps apostrophes
+     * verbatim).
+     */
+    private fun resourceValue(name: String): String? {
+        val xml = repoFile("titlan-android/app/src/main/res/values/strings.xml").readText(Charsets.UTF_8)
+        val raw = Regex("<string\\s+name=\"$name\"\\s*>(.*?)</string>", RegexOption.DOT_MATCHES_ALL)
+            .find(xml)?.groupValues?.get(1)?.trim() ?: return null
+        return if (raw.length >= 2 && raw.startsWith("\"") && raw.endsWith("\"")) {
+            raw.substring(1, raw.length - 1)
+        } else {
+            raw
+        }
     }
 
     /** Resolves a repo path by walking up from the test working directory. */

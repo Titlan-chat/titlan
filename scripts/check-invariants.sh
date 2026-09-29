@@ -1056,9 +1056,110 @@ if ! grep -qF 'F-D / F-E / F-F (2026-09-26' docs/design/2026-09-release-candidat
   fail=1
 fi
 
+# --- 20. Conversation UI (5e-1) ----------------------------------------------
+# The conversation list + chat screen unit (docs/design/2026-09-conversation-ui-freeze.md):
+# FLAG-2 discharged — every user-visible string is a resource (20a); the app
+# layer's logcat surface stays the two pinned emitter files (20b); the chat
+# composer cap is single-sourced to the envelope spec's maximum payload (20c,
+# finding F-H); no message/draft/offer text rides saved instance state (20d);
+# the device-evidence literals exist where the checklists read them (20e);
+# the freeze is on the tree, Apache-2.0, hash-chained (20f). Containment
+# (20g) is asserted by the unit's order against its base commit, not here.
+cu_main="titlan-android/app/src/main/kotlin"
+cu_failure="$cu_main/app/titlan/pairing/PairingFailure.kt"
+cu_limits="$cu_main/app/titlan/conversation/ChatLimits.kt"
+cu_chat="$cu_main/app/titlan/conversation/ChatScreen.kt"
+cu_pairing="$cu_main/app/titlan/pairing/PairingScreen.kt"
+cu_strings="titlan-android/app/src/main/res/values/strings.xml"
+cu_freeze="docs/design/2026-09-conversation-ui-freeze.md"
+# 20a. Copy convention: no user-facing literal in Kotlin — a floor, not the
+#      whole proof (the PR read is); Text("…") and the attribute forms.
+cu_text_lits=$(grep -rnE 'Text\(\s*"' "$cu_main" || true)
+if [ -n "$cu_text_lits" ]; then
+  echo "conversation UI 20a: hard-coded Text(\"…\") copy under $cu_main (FLAG-2: every user-visible string is a resource):"
+  echo "$cu_text_lits"
+  fail=1
+fi
+cu_attr_lits=$(grep -rnE '^\s*(text|contentDescription|label|placeholder)\s*=\s*"' "$cu_main" || true)
+if [ -n "$cu_attr_lits" ]; then
+  echo "conversation UI 20a: hard-coded text/contentDescription/label/placeholder literal under $cu_main:"
+  echo "$cu_attr_lits"
+  fail=1
+fi
+if ! grep -qF 'fun userMessageRes(cls: PairingFailureClass): Int' "$cu_failure"; then
+  echo "conversation UI 20a: $cu_failure must map classes to resource ids: fun userMessageRes(cls: PairingFailureClass): Int"
+  fail=1
+fi
+cu_failure_lits=$(grep -nE '"' "$cu_failure" | grep -vE '^[0-9]+:\s*(//|\*|/\*)' || true)
+if [ -n "$cu_failure_lits" ]; then
+  echo "conversation UI 20a: $cu_failure carries string literals outside comments (the vocabulary lives in strings.xml):"
+  echo "$cu_failure_lits"
+  fail=1
+fi
+# 20b. Stray-log sweep: only the two pinned emitter files name android.util.Log.
+cu_log_files=$(grep -rl 'android.util.Log' "$cu_main" | sort || true)
+cu_log_expected=$(printf '%s\n' "$cu_main/app/titlan/core/CoreClient.kt" "$cu_main/app/titlan/pairing/QrCodec.kt")
+if [ "$cu_log_files" != "$cu_log_expected" ]; then
+  echo "conversation UI 20b: android.util.Log must appear only in core/CoreClient.kt and pairing/QrCodec.kt (TM-C2); found:"
+  echo "$cu_log_files"
+  fail=1
+fi
+# 20c. Chat cap single-sourced to the spec's maximum payload (F-H mitigation).
+if ! grep -qF 'const val MAX_CHAT_UTF8_BYTES = 8186' "$cu_limits" 2>/dev/null; then
+  echo "conversation UI 20c: $cu_limits must carry: const val MAX_CHAT_UTF8_BYTES = 8186"
+  fail=1
+fi
+if ! grep -qF 'Maximum payload under the default profile: **8186 bytes**' proto/envelope.md; then
+  echo "conversation UI 20c: proto/envelope.md no longer states the 8186-byte maximum the chat cap is pinned to"
+  fail=1
+fi
+# 20d. No saved-state plaintext: rememberSaveable is absent from the two
+#      screens that hold message, draft or offer text.
+for cu_f in "$cu_chat" "$cu_pairing"; do
+  if [ ! -f "$cu_f" ]; then
+    echo "conversation UI 20d: MISSING $cu_f"
+    fail=1
+  elif grep -q 'rememberSaveable' "$cu_f"; then
+    echo "conversation UI 20d: $cu_f must not use rememberSaveable (INV-1: no message/draft/offer text in saved instance state)"
+    fail=1
+  fi
+done
+# 20e. Device-evidence literals where the checklists read them.
+if ! grep -qF '>Paired — conversation established' "$cu_strings"; then
+  echo "conversation UI 20e: $cu_strings must carry the chat empty-state beginning 'Paired — conversation established' (checklist §0/§8 evidence)"
+  fail=1
+fi
+if ! grep -qF '>Titlan sync active<' "$cu_strings"; then
+  echo "conversation UI 20e: $cu_strings must carry the fixed sync notification text 'Titlan sync active' (4b-2 §7)"
+  fail=1
+fi
+for cu_sec in '## 0. Pre-tag device smoke' '## 8. Production-relay acceptance'; do
+  cu_block=$(awk -v s="$cu_sec" 'index($0,s)==1{p=1;next} /^## /{p=0} p' docs/release-checklist.md)
+  for cu_lit in 'Message exchange (5e-1)' 'Airplane-mode round trip (5e-1)'; do
+    if ! printf '%s\n' "$cu_block" | grep -qF "$cu_lit"; then
+      echo "conversation UI 20e: docs/release-checklist.md section '$cu_sec' lacks the block: $cu_lit"
+      fail=1
+    fi
+  done
+done
+# 20f. The freeze is on the tree, Apache-2.0, hash-chained to the RC freeze.
+if [ ! -f "$cu_freeze" ]; then
+  echo "conversation UI 20f: MISSING $cu_freeze"
+  fail=1
+else
+  if [ "$(head -5 "$cu_freeze" | grep -cF 'SPDX-License-Identifier: Apache-2.0' || true)" -lt 1 ]; then
+    echo "conversation UI 20f: $cu_freeze lacks the Apache-2.0 SPDX header"
+    fail=1
+  fi
+  if ! grep -qF '6d817c2f80276865e4f0df5b685b7aaa87cde6cac570b70fa04924fb3b41ff07' "$cu_freeze"; then
+    echo "conversation UI 20f: $cu_freeze lacks the hash-chain predecessor (RC freeze whole-file sha256 6d817c2f…ff07)"
+    fail=1
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4), pairing on device (5d-5))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1))."

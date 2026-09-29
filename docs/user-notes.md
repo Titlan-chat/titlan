@@ -36,3 +36,21 @@ Android build). This is your choice; the app never prompts for it.
 
 Source: `docs/threat-model.md` TM-C7 (register row);
 `docs/checklists/4b2-f-doze-latency.md`.
+
+## What the connection label on a conversation means
+
+Each conversation shows the state of its own link to the relay: "Connecting…",
+"Online", "Offline", "Reconnecting…" or "Recovering…". All but "Offline" mean
+Titlan is working on it and no action is needed; "Offline" means this device
+has no network path right now. A separate banner — "This conversation can no
+longer reach the other device. Pair again to continue." — means the relay-side
+mailboxes for that conversation were lost on both sides (for example after a
+relay restart during a long outage) and in-band recovery ran out; pairing
+again is the only way forward.
+
+Messages carry no delivery ticks and no times in this version. A message in
+your list has been handed to Titlan for delivery, not necessarily delivered;
+one the relay refused for good is marked "Not delivered".
+
+Source: `docs/design/2026-09-conversation-ui-freeze.md` CU-D6 (states, the
+no-ticks decision); `docs/threat-model.md` TM-R4 (restart loss and recovery).

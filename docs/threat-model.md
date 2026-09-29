@@ -144,6 +144,9 @@ device transfer are disabled so no extracted copy of app data exists.
 `androidTest/Inv1AtRestTest.kt :: noPlaintextAtRestAfterIdentityCreation`
 (walks every app-accessible storage root after key-wrap, core open, and
 identity generation);
+`androidTest/conversation/ChatAtRestTest.kt :: chatTextNeverAtRest` (5e-1:
+the same walk after a chat message was sent and one received through the
+conversation store — raw, hex, and Base64 forms of both canaries);
 `androidTest/crypto/DbKeyManagerTest.kt :: firstCallCreatesWrappedKeyAtRest`,
 `androidTest/crypto/DbKeyManagerTest.kt :: tamperedBlobFailsToUnwrap`,
 `androidTest/crypto/DbKeyManagerTest.kt :: wrappingIsRandomized`,
@@ -164,6 +167,11 @@ and a bare count; every other logcat call in those files is a failure.
 buffers, every common encoding, across the key's full lifecycle, with a
 positive-control canary);
 `androidTest/sync/SyncLogcatHygieneTest.kt :: noSecretsInLogcatAcrossSyncPath`;
+`androidTest/conversation/ChatLogcatHygieneTest.kt :: chatTextNeverAppearsInLogcat`
+(5e-1: a sent and a received chat canary, all buffers, with a positive control);
+`scripts/check-invariants.sh family 20b` (5e-1: no file under the app's
+`src/main/kotlin` other than the two pinned emitter files names
+`android.util.Log`);
 `scripts/check-invariants.sh family 6`, `scripts/check-invariants.sh family 9`,
 `scripts/check-invariants.sh family 10` (the pinned emitters and stray-log
 sweeps); `scripts/check-invariants.sh family 12` (crash-SDK absence: zero

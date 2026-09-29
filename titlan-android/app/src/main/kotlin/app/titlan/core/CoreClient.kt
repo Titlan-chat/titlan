@@ -54,6 +54,9 @@ interface CoreClient : AutoCloseable {
     /** Queues a chat message; the sync engine delivers + retries. */
     fun sendChat(conversationId: ByteArray, text: String)
 
+    /** All stored messages of a conversation in store order (5e-1, CU-D6). */
+    fun messages(conversationId: ByteArray): List<StoredChatMessage>
+
     /**
      * Starts receive-sync, fanning core callbacks into [events]. Idempotent in
      * core (rehydrates from SQLCipher). Called after the service is foreground.
@@ -70,6 +73,20 @@ interface CoreClient : AutoCloseable {
  * of the core record so generated types stay inside this file.
  */
 data class OfferValidity(val issuedAtEpochSeconds: Long, val ttlSeconds: Long)
+
+/**
+ * App-side mirror of a stored message as core returns it (5e-1): id and
+ * conversation id as raw bytes, direction, the envelope's payload type and
+ * type version, and the payload bytes. Generated types stay inside this file.
+ */
+class StoredChatMessage(
+    val id: ByteArray,
+    val conversationId: ByteArray,
+    val incoming: Boolean,
+    val payloadType: Int,
+    val typeVersion: Int,
+    val body: ByteArray,
+)
 
 object CoreClientFactory {
     /**
@@ -111,6 +128,18 @@ private class FfiCoreClient(private val ffi: FfiClient) : CoreClient {
 
     override fun sendChat(conversationId: ByteArray, text: String) =
         ffi.sendChat(conversationId, text)
+
+    override fun messages(conversationId: ByteArray): List<StoredChatMessage> =
+        ffi.messages(conversationId).map { m ->
+            StoredChatMessage(
+                id = m.id,
+                conversationId = m.conversationId,
+                incoming = m.incoming,
+                payloadType = m.payloadType.toInt(),
+                typeVersion = m.typeVersion.toInt(),
+                body = m.body,
+            )
+        }
 
     override fun startSync(events: SyncEvents) =
         ffi.startSync(ObserverAdapter(events), ReceiverAdapter(events))

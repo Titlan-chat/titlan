@@ -6,10 +6,31 @@
   brand strings must not appear in any resource except the future About
   screen, whose resource names must be prefixed `about_`;
   scripts/check-invariants.sh enforces this.
+
+  5e-1 (FLAG-2 discharged): EVERY user-visible string lives here; Kotlin
+  carries no user-facing literal (scripts/check-invariants.sh family 20a).
+  A value containing an apostrophe uses the double-quoted resource form so
+  its wording stays byte-verbatim between the quotes (the plain-JVM
+  CopyConventionTest strips exactly one enclosing quote pair). Frozen
+  wording is marked as such and is never edited in place.
 -->
 <resources>
     <string name="app_name">Titlan</string>
-    <string name="scaffold_placeholder">Titlan</string>
+
+    <!-- Pairing screen: the 4b-2 / 5a-2 / 5d-5 copy, moved here verbatim. -->
+    <string name="pairing_show_offer">Show pairing offer</string>
+    <string name="pairing_mint_failed">Could not create an offer — check connectivity and retry.</string>
+    <string name="pairing_offer_expired">Offer expired. Start a new one.</string>
+    <string name="pairing_new_offer">New offer</string>
+    <string name="pairing_scan_title">Scan this to pair</string>
+    <string name="pairing_qr_content_description">Pairing QR code</string>
+    <string name="pairing_offer_validity">This offer stays scannable for about %1$d min (single-use).</string>
+    <string name="pairing_dismiss">Dismiss</string>
+    <string name="pairing_non_default_relay">This offer uses a non-default relay:</string>
+    <string name="pairing_confirm_and_pair">Confirm and pair</string>
+    <string name="pairing_paste_prompt_scanning">Trouble scanning? Paste the titlan://pair# link:</string>
+    <string name="pairing_paste_prompt">Paste the titlan://pair# link to pair:</string>
+    <string name="pairing_pair_from_link">Pair from link</string>
     <!--
       Per-path security claim (proto/pairing.md, NORMATIVE): the same offer
       bytes travel two carriers with different exposure, and the UI must say
@@ -18,4 +39,50 @@
       pins only presence and the QR-is-stronger keyword.
     -->
     <string name="pairing_link_path_security">Link pairing is weaker than QR. Anyone who reads the link in transit (chat apps, clipboard managers, browser history) holds the whole offer and can pair with you instead of the person you meant. A malicious app on this phone can also claim titlan:// links and capture the offer. Scan the QR in person whenever you can.</string>
+
+    <!--
+      Pairing-failure vocabulary (P5-D2, ratified 2026-08-05: the four user
+      classes plus INTERNAL), moved verbatim from PairingFailure.kt.
+      pairing_failure_expired is the pair-offer v3 freeze §5 wording VERBATIM
+      (V3-D2: one surface for both expiry details) — never edit.
+    -->
+    <string name="pairing_failure_network">"Can't reach the relay — check this device's connection and try again."</string>
+    <string name="pairing_failure_expired">"offer expired or not yet valid — check both devices' clocks, then re-mint"</string>
+    <string name="pairing_failure_malformed">"That code isn't a valid pairing offer — re-scan it, or mint a fresh one on the other device."</string>
+    <string name="pairing_failure_crypto">Pairing failed a cryptographic check — stop and mint a fresh offer on the other device.</string>
+    <string name="pairing_failure_internal">Pairing failed from an internal error on this device — try again.</string>
+
+    <!--
+      Receive-sync foreground-service notification (4b-2 frozen §7: fixed
+      text, zero metadata, zero dynamic state). Value verbatim from the former
+      SyncService.NOTIFICATION_TEXT; docs/checklists/4b2-f-doze-latency.md P4
+      reads this exact text.
+    -->
+    <string name="sync_notification_title">Titlan sync active</string>
+
+    <!-- Conversation list (5e-1). -->
+    <string name="conversations_title">Conversations</string>
+    <string name="conversations_row_label">Conversation %1$s</string>
+    <string name="conversations_pair_device">Pair a device</string>
+
+    <!--
+      Chat screen (5e-1). chat_empty_paired BEGINS with the literal the
+      release checklist reads as pairing evidence on both devices (§0/§8).
+    -->
+    <string name="chat_empty_paired">Paired — conversation established. Messages you send and receive appear here.</string>
+    <string name="chat_compose_hint">Message</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_too_long">This message is too long to send — shorten it.</string>
+    <string name="chat_message_unsupported">[Unsupported message type]</string>
+    <string name="chat_message_undecodable">[Message could not be displayed]</string>
+    <string name="chat_message_not_delivered">Not delivered — the relay refused this message.</string>
+    <string name="chat_state_connecting">Connecting…</string>
+    <string name="chat_state_online">Online</string>
+    <string name="chat_state_offline">Offline</string>
+    <string name="chat_state_backoff">Reconnecting…</string>
+    <string name="chat_state_recovering">Recovering…</string>
+    <string name="chat_needs_repair">This conversation can no longer reach the other device. Pair again to continue.</string>
+    <string name="chat_pair_again">Pair again</string>
+    <string name="chat_storage_error">Storage error — this device could not read or write its message store.</string>
+    <string name="nav_back">Back</string>
 </resources>

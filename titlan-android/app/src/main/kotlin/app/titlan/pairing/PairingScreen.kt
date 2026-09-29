@@ -55,6 +55,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.titlan.BuildConfig
 import app.titlan.R
+import app.titlan.conversation.ConversationKey
+import app.titlan.conversation.ConversationStore
+import app.titlan.conversation.OfferWatcher
+import app.titlan.conversation.PairingCompletion
+import app.titlan.core.AppCore
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
 import com.google.zxing.PlanarYUVLuminanceSource
@@ -67,12 +72,14 @@ import kotlinx.coroutines.withContext
 
 /**
  * The three lifecycle states of a shown offer (frozen design §3: single-use,
- * 1 h TTL). [Active] while the QR/link is live; [Paired] once a peer completes
- * the handshake; [Expired] once the TTL lapses with no peer.
+ * 1 h TTL). [Active] while the QR/link is live, with the conversation keys
+ * that existed before the mint (5e-1 R-3); [Paired] once a peer completes the
+ * handshake; [Expired] once the TTL lapses with no peer. No state carries a
+ * `ByteArray` (5e-1 R-2): a conversation is named by its hex key.
  */
 sealed interface OfferLifecycle {
-    data class Active(val offer: PairingOffer) : OfferLifecycle
-    data class Paired(val conversationId: ByteArray) : OfferLifecycle
+    data class Active(val offer: PairingOffer, val before: Set<ConversationKey>) : OfferLifecycle
+    data class Paired(val key: ConversationKey) : OfferLifecycle
     data object Expired : OfferLifecycle
 }
 
@@ -87,13 +94,18 @@ sealed interface OfferLifecycle {
  *    paste path is offered (§5 fallback), so a slow/failed scan is never a dead
  *    end.
  *
+ * 5e-1 (freeze CU-D4/CU-D5/CU-D8): both roles end in [OfferLifecycle.Paired],
+ * where [PairingCompletion.complete] refreshes the list and starts sync with
+ * the UI sink before [onPaired] navigates to the chat.
+ *
  * A3: no crypto/framing here — everything routes through [PairingCoordinator].
  */
 @Composable
-fun PairingScreen() {
+fun PairingScreen(onPaired: (ConversationKey) -> Unit) {
     var offer by remember { mutableStateOf<OfferLifecycle?>(null) }
     var mintFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current.applicationContext
 
     Column(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()).padding(24.dp),
@@ -104,41 +116,57 @@ fun PairingScreen() {
             null -> {
                 Button(onClick = {
                     // Minting creates the pairing mailbox on the relay — a
-                    // network round-trip, kept off the main thread.
+                    // network round-trip, kept off the main thread. The keys
+                    // that exist before the mint are captured first (R-3), so
+                    // the watcher can tell the paired conversation apart.
                     scope.launch {
                         mintFailed = false
                         runCatching {
-                            withContext(Dispatchers.IO) { PairingCoordinator.createOffer() }
+                            withContext(Dispatchers.IO) {
+                                val before = ConversationStore.refreshConversations().toSet()
+                                PairingCoordinator.createOffer() to before
+                            }
                         }
-                            .onSuccess { offer = OfferLifecycle.Active(it) }
+                            .onSuccess { (o, b) -> offer = OfferLifecycle.Active(o, b) }
                             .onFailure { mintFailed = true }
                     }
                 }) {
-                    Text("Show pairing offer")
+                    Text(stringResource(R.string.pairing_show_offer))
                 }
-                if (mintFailed) Text("Could not create an offer — check connectivity and retry.")
+                if (mintFailed) Text(stringResource(R.string.pairing_mint_failed))
                 ScanSection(onPaired = { offer = OfferLifecycle.Paired(it) })
             }
 
             is OfferLifecycle.Active -> OfferSection(
                 offer = state.offer,
+                before = state.before,
                 onExpired = { offer = OfferLifecycle.Expired },
                 onDismiss = { offer = null },
+                onPaired = { offer = OfferLifecycle.Paired(it) },
             )
 
-            is OfferLifecycle.Paired ->
-                Text("Paired — conversation established (${state.conversationId.size}-byte id).")
+            is OfferLifecycle.Paired -> {
+                // Both roles pass here (CU-D5/CU-D8): the list is refreshed and
+                // sync starts with the UI sink before the chat opens.
+                Text(stringResource(R.string.chat_empty_paired))
+                LaunchedEffect(state) {
+                    PairingCompletion.complete(context, state.key.bytes)
+                    onPaired(state.key)
+                }
+            }
 
             OfferLifecycle.Expired -> {
-                Text("Offer expired. Start a new one.")
-                Button(onClick = { offer = null }) { Text("New offer") }
+                Text(stringResource(R.string.pairing_offer_expired))
+                Button(onClick = { offer = null }) { Text(stringResource(R.string.pairing_new_offer)) }
             }
         }
     }
 }
 
 /**
- * Offerer view: the QR + link, with a TTL watch that flips to Expired.
+ * Offerer view: the QR + link, with a TTL watch that flips to Expired and,
+ * beside it, the completion watch (5e-1, CU-D4) that reports the first
+ * conversation key not in [before] while the offer is shown.
  *
  * Dismissing does NOT cancel the offer, and the UI must never claim it does
  * (F3): true cancellation awaits a core FFI cancel method (ledgered follow-up,
@@ -146,7 +174,13 @@ fun PairingScreen() {
  * its TTL, and the dismiss row states the remaining validity honestly.
  */
 @Composable
-private fun OfferSection(offer: PairingOffer, onExpired: () -> Unit, onDismiss: () -> Unit) {
+private fun OfferSection(
+    offer: PairingOffer,
+    before: Set<ConversationKey>,
+    onExpired: () -> Unit,
+    onDismiss: () -> Unit,
+    onPaired: (ConversationKey) -> Unit,
+) {
     val qr = remember(offer) { renderQr(QrCodec.encodeQr(offer.bytes)) }
 
     // Force max screen brightness while the QR is on screen; restore on
@@ -166,27 +200,35 @@ private fun OfferSection(offer: PairingOffer, onExpired: () -> Unit, onDismiss: 
         }
     }
 
-    Text("Scan this to pair", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+    Text(
+        stringResource(R.string.pairing_scan_title),
+        style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+    )
     // F-D (checklist §0, 2026-09-26): the bitmap is 1 px per module, so drawn
     // at its intrinsic size a near-capacity offer is ~0.4 in on a phone. Fill
     // the width, keep it square, and upscale nearest-neighbour so the modules
     // stay crisp for the scanning camera.
     Image(
         bitmap = qr.asImageBitmap(),
-        contentDescription = "Pairing QR code",
+        contentDescription = stringResource(R.string.pairing_qr_content_description),
         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
         filterQuality = FilterQuality.None,
     )
     Text(QrCodec.encodeLink(offer.bytes))
     val remainingMinutes =
         ((offer.expiresAtEpochMillis - System.currentTimeMillis()) / 60_000L).coerceAtLeast(0)
-    Text("This offer stays scannable for about $remainingMinutes min (single-use).")
-    Button(onClick = onDismiss) { Text("Dismiss") }
+    Text(stringResource(R.string.pairing_offer_validity, remainingMinutes))
+    Button(onClick = onDismiss) { Text(stringResource(R.string.pairing_dismiss)) }
 
     LaunchedEffect(offer) {
         val remaining = offer.expiresAtEpochMillis - System.currentTimeMillis()
         if (remaining > 0) delay(remaining)
         onExpired()
+    }
+    // CU-D4: the offerer completion signal, bounded by the offer's validity.
+    LaunchedEffect(offer) {
+        val key = OfferWatcher.awaitNewConversation(before, offer.expiresAtEpochMillis)
+        if (key != null) onPaired(key)
     }
 }
 
@@ -197,7 +239,7 @@ private fun OfferSection(offer: PairingOffer, onExpired: () -> Unit, onDismiss: 
  * 20 s decode timeout. The link path is offered proactively, never as an error.
  */
 @Composable
-private fun ScanSection(onPaired: (ByteArray) -> Unit) {
+private fun ScanSection(onPaired: (ConversationKey) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var timedOut by remember { mutableStateOf(false) }
@@ -225,7 +267,8 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
     }
 
     val scope = rememberCoroutineScope()
-    var acceptFailure by remember { mutableStateOf<String?>(null) }
+    // The failure surface is a string resource id (5e-1, CU-D9).
+    var acceptFailure by remember { mutableStateOf<Int?>(null) }
 
     // Establishing the session is a relay round-trip (pair-ack → inbox
     // handoff) — kept off the main thread. Failure re-arms the scanner and
@@ -236,9 +279,9 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
             runCatching {
                 withContext(Dispatchers.IO) { PairingCoordinator.acceptScannedOffer(bytes) }
             }
-                .onSuccess(onPaired)
+                .onSuccess { onPaired(ConversationKey.of(it)) }
                 .onFailure {
-                    acceptFailure = PairingFailure.userMessage(it)
+                    acceptFailure = PairingFailure.userMessageRes(it)
                     scanned = null
                     pendingRelay = null
                 }
@@ -247,12 +290,20 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
 
     // Decode → confirm-relay-if-non-default → establish. The relay peek runs
     // off the main thread too: the first core touch opens the encrypted store.
+    // R-1 (5e-1, CU-D14): a failed peek surfaces its classified copy and
+    // re-arms the scanner; it never proceeds to establish.
     fun onOfferBytes(bytes: ByteArray) {
         if (scanned != null) return
         scanned = bytes
         scope.launch {
-            val relay = withContext(Dispatchers.IO) { offerRelay(bytes) }
-            if (relay != null && relay != BuildConfig.RELAY_URL) {
+            val peek = withContext(Dispatchers.IO) { runCatching { AppCore.get().peekOfferRelay(bytes) } }
+            if (peek.isFailure) {
+                acceptFailure = PairingFailure.userMessageRes(peek.exceptionOrNull()!!)
+                scanned = null
+                return@launch
+            }
+            val relay = peek.getOrThrow()
+            if (relay != BuildConfig.RELAY_URL) {
                 pendingRelay = relay to bytes
             } else {
                 establish(bytes)
@@ -260,14 +311,14 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
         }
     }
 
-    acceptFailure?.let { Text(it) }
+    acceptFailure?.let { Text(stringResource(it)) }
 
     val relayPending = pendingRelay
     if (relayPending != null) {
-        Text("This offer uses a non-default relay:")
+        Text(stringResource(R.string.pairing_non_default_relay))
         Text(relayPending.first)
         Button(onClick = { establish(relayPending.second) }) {
-            Text("Confirm and pair")
+            Text(stringResource(R.string.pairing_confirm_and_pair))
         }
         return
     }
@@ -317,8 +368,9 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
     if (!hasCamera || cameraDenied || timedOut) {
         var pasted by remember { mutableStateOf("") }
         Text(
-            if (scanning) "Trouble scanning? Paste the titlan://pair# link:"
-            else "Paste the titlan://pair# link to pair:",
+            stringResource(
+                if (scanning) R.string.pairing_paste_prompt_scanning else R.string.pairing_paste_prompt,
+            ),
         )
         // F7 (ratified 2026-08-20): proto/pairing.md's per-path security
         // claims are NORMATIVE — the link carrier has strictly weaker
@@ -343,9 +395,9 @@ private fun ScanSection(onPaired: (ByteArray) -> Unit) {
             runCatching { QrCodec.decodeLink(pasted.trim()) }
                 .onSuccess(::onOfferBytes)
                 .onFailure {
-                    acceptFailure = PairingFailure.userMessage(PairingFailureClass.MALFORMED)
+                    acceptFailure = PairingFailure.userMessageRes(PairingFailureClass.MALFORMED)
                 }
-        }) { Text("Pair from link") }
+        }) { Text(stringResource(R.string.pairing_pair_from_link)) }
     }
 
     LaunchedEffect(scanning) {
@@ -389,10 +441,6 @@ private class QrAnalyzer(private val onBytes: (ByteArray) -> Unit) : ImageAnalys
 }
 
 private const val SCAN_TIMEOUT_MS = 20_000L
-
-/** Best-effort read of the relay URL from an offer, for the §3 confirm gate. */
-private fun offerRelay(offerBytes: ByteArray): String? =
-    runCatching { app.titlan.core.AppCore.get().peekOfferRelay(offerBytes) }.getOrNull()
 
 /** Renders a [QrMatrix] to a black/white [Bitmap] for display. */
 private fun renderQr(matrix: QrMatrix): Bitmap {
