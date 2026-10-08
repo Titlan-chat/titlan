@@ -20,14 +20,14 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::client::{ConnectionObserver, ConnectionState, ConversationId, MessageReceiver};
-use crate::config::PaddingProfile;
+use crate::config::{KeepaliveTiming, PaddingProfile, TransportTiming};
 use crate::envelope::{InnerFrame, PayloadType};
 use crate::pairing::{PAIRING_SECRET_LEN, RECOVERY_CONTRIB_LEN};
 use crate::storage::{Direction, Store, StoredMessage};
 use crate::{CoreError, Result, identity, pairing, session};
 
 use self::http::DepositOutcome;
-use self::ws::Connected;
+use self::ws::{Connected, Event};
 
 /// Recovery/pairing role codes stored in schema v3 (`recovery_role`) and mixed
 /// into the derived-mailbox `role_label` (`crate::recovery::Role`).
@@ -63,6 +63,9 @@ pub(crate) struct Engine {
     my_relay: String,
     http: reqwest::Client,
     profile: PaddingProfile,
+    /// Subscription keepalive (5e-1b, F-L): production constants, or a test
+    /// injection through `TitlanClient::open_with_timing`.
+    keepalive: KeepaliveTiming,
     handle: Handle,
     receiver: Mutex<Option<Arc<dyn MessageReceiver>>>,
     observer: Mutex<Option<Arc<dyn ConnectionObserver>>>,
@@ -93,14 +96,20 @@ enum Recovery {
 }
 
 impl Engine {
-    pub(crate) fn new(store: Arc<Store>, my_relay: String, handle: Handle) -> Result<Arc<Self>> {
+    pub(crate) fn new(
+        store: Arc<Store>,
+        my_relay: String,
+        handle: Handle,
+        timing: TransportTiming,
+    ) -> Result<Arc<Self>> {
         ws::install_ring_provider();
-        let http = ws::build_http_client()?;
+        let http = ws::build_http_client(timing.http)?;
         Ok(Arc::new(Engine {
             store,
             my_relay,
             http,
             profile: PaddingProfile::default_profile(),
+            keepalive: timing.keepalive,
             handle,
             receiver: Mutex::new(None),
             observer: Mutex::new(None),
@@ -375,14 +384,17 @@ impl Engine {
     ) -> Result<()> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
-            match ws::subscribe(&self.my_relay, my_inbox, None).await {
+            match ws::subscribe(&self.my_relay, my_inbox, None, self.keepalive).await {
                 Connected::Ok(mut sub) => loop {
                     let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                     if remaining.is_zero() {
                         return Err(CoreError::Network("pairing handoff timed out".into()));
                     }
                     match tokio::time::timeout(remaining, sub.next()).await {
-                        Ok(Ok(Some((msg_id, envelope)))) => {
+                        // A keepalive tick cannot occur inside the 10 s window
+                        // in production; under test timing it is just silence.
+                        Ok(Ok(Some(Event::Idle))) => {}
+                        Ok(Ok(Some(Event::Delivery(msg_id, envelope)))) => {
                             if let Ok(frame) = session::decrypt_message(
                                 &self.store,
                                 peer_addr,
@@ -930,7 +942,7 @@ async fn conversation_listener(
         engine.emit_state(conv, ConnectionState::Connecting);
         let connected = tokio::select! {
             () = cancelled(&mut cancel) => return,
-            c = ws::subscribe(&engine.my_relay, &recv, convo.relay_pin) => c,
+            c = ws::subscribe(&engine.my_relay, &recv, convo.relay_pin, engine.keepalive) => c,
         };
         match connected {
             Connected::Ok(mut sub) => {
@@ -946,8 +958,22 @@ async fn conversation_listener(
                         () = cancelled(&mut cancel) => return,
                         n = sub.next() => n,
                     };
-                    let Ok(Some((msg_id, envelope))) = next else {
-                        break; // subscription ended/errored → reconnect path
+                    let (msg_id, envelope) = match next {
+                        Ok(Some(Event::Delivery(id, env))) => (id, env),
+                        // Keepalive round trip: the socket is live and idle —
+                        // the moment to retry anything still pending (F-L,
+                        // KA-D3). A deposit that failed while the socket
+                        // lived no longer waits for a reconnect.
+                        Ok(Some(Event::Idle)) => {
+                            tokio::select! {
+                                () = cancelled(&mut cancel) => return,
+                                _ = engine.flush_pending(&conv) => {}
+                            }
+                            continue;
+                        }
+                        // Subscription ended, errored, or its keepalive timed
+                        // out → reconnect path.
+                        Ok(None) | Err(_) => break,
                     };
                     // S3 shield: from here to ack completion there is no
                     // cancellation point (see the doc comment above).
@@ -1035,9 +1061,12 @@ async fn pairing_listener_v2(
     secret: [u8; PAIRING_SECRET_LEN],
 ) {
     loop {
-        match ws::subscribe(&engine.my_relay, &pairing_inbox, None).await {
+        match ws::subscribe(&engine.my_relay, &pairing_inbox, None, engine.keepalive).await {
             Connected::Ok(mut sub) => {
-                while let Ok(Some((msg_id, envelope))) = sub.next().await {
+                while let Ok(Some(event)) = sub.next().await {
+                    let Event::Delivery(msg_id, envelope) = event else {
+                        continue; // keepalive tick: the offer stands
+                    };
                     match engine
                         .handle_pair_ack_v2(&pairing_inbox, &secret, &envelope)
                         .await
