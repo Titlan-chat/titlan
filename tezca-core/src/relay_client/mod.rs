@@ -83,6 +83,13 @@ pub(crate) struct Engine {
     /// peer contact (3 → needs-repair); relay 429s are pacing, never counted.
     exhaustion:
         Mutex<std::collections::HashMap<ConversationId, crate::recovery::ExhaustionTracker>>,
+    /// Per-conversation flush serialization (5e-1b, finding F-M, KA-D11):
+    /// every `flush_pending` caller — the inline send, the connect-time
+    /// flush, the keepalive tick, the recovery paths — holds the
+    /// conversation's guard across its encrypt→deposit→mark span, so two
+    /// overlapping callers can never encrypt and deposit the same pending
+    /// row twice. The `std` mutex is held only to fetch the guard.
+    flush_locks: Mutex<std::collections::HashMap<ConversationId, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 /// Outcome of a §10.7 recovery attempt.
@@ -118,6 +125,7 @@ impl Engine {
             rotation: Mutex::new(std::collections::HashMap::new()),
             hello_seen: Mutex::new(std::collections::HashMap::new()),
             exhaustion: Mutex::new(std::collections::HashMap::new()),
+            flush_locks: Mutex::new(std::collections::HashMap::new()),
         }))
     }
 
@@ -443,6 +451,17 @@ impl Engine {
     }
 
     async fn flush_pending(&self, conv: &ConversationId) -> Result<()> {
+        // F-M (KA-D11): one flush per conversation at a time. A caller that
+        // arrives while another flush is in flight waits for it and then
+        // sees the row already marked `sent` — never a second ciphertext.
+        let flush_lock = self
+            .flush_locks
+            .lock()
+            .expect("flush_locks")
+            .entry(*conv)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone();
+        let _flush_guard = flush_lock.lock().await;
         let convo = match self.store.get_conversation(conv) {
             Ok(Some(c)) => c,
             Ok(None) => return Ok(()),

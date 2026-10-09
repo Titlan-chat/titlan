@@ -34,6 +34,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> ClientIo for T {}
 /// An open subscription to a relay inbox.
 pub(crate) struct Subscription {
     ws: WebSocketStream<Box<dyn ClientIo>>,
+    timing: KeepaliveTiming,
+    /// A Ping is in flight and its Pong is due within `timing.grace`.
+    awaiting_pong: bool,
 }
 
 /// What [`Subscription::next`] yields.
@@ -92,16 +95,44 @@ pub(crate) async fn subscribe(
 }
 
 impl Subscription {
-    fn new(ws: WebSocketStream<Box<dyn ClientIo>>, _timing: KeepaliveTiming) -> Self {
-        Subscription { ws }
+    fn new(ws: WebSocketStream<Box<dyn ClientIo>>, timing: KeepaliveTiming) -> Self {
+        Subscription {
+            ws,
+            timing,
+            awaiting_pong: false,
+        }
     }
 
-    /// Reads the next event: a delivery frame, or `Idle` on a Pong. `None` on
-    /// a clean close; `Err` on a transport failure.
+    /// Reads the next event: a delivery frame, or `Idle` once a keepalive
+    /// Ping has been answered. `None` on a clean close; `Err` on a transport
+    /// failure — including a Pong missing after `timing.grace` (F-L).
+    ///
+    /// Cancellation-safe between frames: state only changes after an await
+    /// completes, and a Ping dropped mid-send is at worst re-sent.
     pub(crate) async fn next(&mut self) -> Result<Option<Event>> {
         loop {
-            match self.ws.next().await {
-                Some(Ok(Message::Binary(data))) => {
+            let wait = if self.awaiting_pong {
+                self.timing.grace
+            } else {
+                self.timing.interval
+            };
+            match tokio::time::timeout(wait, self.ws.next()).await {
+                Err(_elapsed) => {
+                    if self.awaiting_pong {
+                        return Err(CoreError::Network("keepalive timeout".into()));
+                    }
+                    // Silence for a whole interval: ask the relay to prove the
+                    // socket is alive. Empty payload — nothing to correlate.
+                    self.ws
+                        .send(Message::Ping(Vec::new().into()))
+                        .await
+                        .map_err(|e| CoreError::Network(e.to_string()))?;
+                    self.awaiting_pong = true;
+                }
+                Ok(Some(Ok(Message::Binary(data)))) => {
+                    // Any delivery proves liveness; a late Pong is then
+                    // unsolicited and ignored below.
+                    self.awaiting_pong = false;
                     if data.len() < 17 || data[0] != 0x01 {
                         return Err(CoreError::Malformed("bad relay delivery frame"));
                     }
@@ -109,13 +140,18 @@ impl Subscription {
                     id.copy_from_slice(&data[1..17]);
                     return Ok(Some(Event::Delivery(id, data[17..].to_vec())));
                 }
-                Some(Ok(Message::Pong(_))) => return Ok(Some(Event::Idle)),
-                Some(Ok(Message::Ping(p))) => {
+                Ok(Some(Ok(Message::Pong(_)))) => {
+                    if self.awaiting_pong {
+                        self.awaiting_pong = false;
+                        return Ok(Some(Event::Idle));
+                    }
+                }
+                Ok(Some(Ok(Message::Ping(p)))) => {
                     let _ = self.ws.send(Message::Pong(p)).await;
                 }
-                Some(Ok(Message::Close(_))) | None => return Ok(None),
-                Some(Ok(_)) => {}
-                Some(Err(e)) => return Err(CoreError::Network(e.to_string())),
+                Ok(Some(Ok(Message::Close(_))) | None) => return Ok(None),
+                Ok(Some(Ok(_))) => {}
+                Ok(Some(Err(e))) => return Err(CoreError::Network(e.to_string())),
             }
         }
     }
@@ -161,7 +197,7 @@ pub(crate) fn install_ring_provider() {
 /// its own verifier construction is never reached (family 18b). Every call
 /// is bounded by `timeouts` (F-L, KA-D4): a black-holed route fails within
 /// the request timeout instead of the OS's TCP give-up.
-pub(crate) fn build_http_client(_timeouts: HttpTimeouts) -> Result<reqwest::Client> {
+pub(crate) fn build_http_client(timeouts: HttpTimeouts) -> Result<reqwest::Client> {
     #[cfg(feature = "test-relay-anchor")]
     let config = match pin::env_test_pin() {
         Some(p) => pin::pinned_client_config(p)?,
@@ -171,6 +207,8 @@ pub(crate) fn build_http_client(_timeouts: HttpTimeouts) -> Result<reqwest::Clie
     let config = pin::bundled_client_config()?;
     reqwest::Client::builder()
         .use_preconfigured_tls(config)
+        .connect_timeout(timeouts.connect)
+        .timeout(timeouts.request)
         .build()
         .map_err(|e| CoreError::Network(e.to_string()))
 }
