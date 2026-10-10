@@ -5,6 +5,7 @@ package app.titlan.sync
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,5 +58,27 @@ class SyncServiceLifecycleTest {
         // restore connectivity, and assert delivery + durable persistence with
         // the app backgrounded. Notification absence is NOT a failure (§7).
         assertTrue("sync must be running after start", SyncController.isRunning(context))
+    }
+
+    /**
+     * Finding F-N: a stop that follows a start before the service has reached
+     * `startForeground()` must not crash the process. Android P+ throws
+     * `ForegroundServiceDidNotStartInTimeException` when a service started
+     * with `startForegroundService` is stopped while still waiting for its
+     * foreground call, and a caller's `stopService` is not exempt — only the
+     * service's own `stopSelf` inside `onStartCommand` is. Twenty back-to-back
+     * cycles make the race land; the pause lets the platform's asynchronous
+     * crash arrive inside this test, so RED is attributed here rather than to
+     * whatever runs next. GREEN: `SyncController.stop` waits for the start's
+     * foreground obligation to settle before `stopService`.
+     */
+    @Test
+    fun stopImmediatelyAfterStartDoesNotCrash() {
+        repeat(20) {
+            SyncController.start(context, RecordingEvents())
+            SyncController.stop(context)
+        }
+        Thread.sleep(1_500)
+        assertFalse("stop must leave sync not running", SyncController.isRunning(context))
     }
 }
