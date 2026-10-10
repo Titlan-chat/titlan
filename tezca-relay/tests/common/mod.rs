@@ -451,3 +451,203 @@ pub fn ws_ack(ws: &mut WsClient, message_id: &[u8; 16]) -> Result<(), String> {
     ws.send(tungstenite::Message::Binary(frame.into()))
         .map_err(|e| e.to_string())
 }
+
+// ---------------------------------------------------------------------------
+// Fault-injecting TCP proxy (unit 5e-1b, finding F-L). Sits between a
+// tezca-core client and a real relay child: forwards bytes transparently until
+// told to (a) stop forwarding on the WebSocket connections accepted so far
+// while leaving them open — the silent dead socket F-L is about — or (b)
+// answer the next N deposit POSTs with 503 itself, without forwarding, or
+// hold every deposit POST for a fixed delay before forwarding it. New
+// connections always forward, so a client that notices and reconnects
+// recovers through the same address.
+// ---------------------------------------------------------------------------
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+struct ProxyCtl {
+    /// Monotonic id handed to each accepted connection.
+    next_generation: AtomicU64,
+    /// WebSocket connections with generation < this value forward nothing.
+    ws_silenced_below: AtomicU64,
+    /// Remaining deposit POSTs to answer with 503.
+    fail_deposits: AtomicUsize,
+    /// Milliseconds every deposit POST is held before it is forwarded.
+    delay_deposits_ms: AtomicU64,
+}
+
+pub struct Proxy {
+    port: u16,
+    ctl: Arc<ProxyCtl>,
+}
+
+impl Proxy {
+    /// `host:port` the client should treat as its relay.
+    pub fn base(&self) -> String {
+        format!("127.0.0.1:{}", self.port)
+    }
+
+    /// Every WebSocket connection accepted so far goes dark: bytes are
+    /// consumed and dropped in both directions, the sockets stay open.
+    pub fn silence_existing_ws(&self) {
+        let g = self.ctl.next_generation.load(Ordering::SeqCst);
+        self.ctl.ws_silenced_below.store(g, Ordering::SeqCst);
+    }
+
+    /// The next `n` deposit POSTs are answered `503` by the proxy and the
+    /// connection is closed, so the relay never sees them.
+    pub fn fail_next_deposits(&self, n: usize) {
+        self.ctl.fail_deposits.store(n, Ordering::SeqCst);
+    }
+
+    /// Every deposit POST from now on is held for `ms` before it reaches the
+    /// relay (each on its own connection, so concurrent deposits overlap
+    /// instead of queueing). `0` restores pass-through.
+    pub fn delay_deposits(&self, ms: u64) {
+        self.ctl.delay_deposits_ms.store(ms, Ordering::SeqCst);
+    }
+}
+
+/// Starts the proxy on a free port in front of `upstream` (`host:port`).
+pub fn start_proxy(upstream: &str) -> Proxy {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("proxy bind");
+    let port = listener.local_addr().expect("proxy addr").port();
+    let ctl = Arc::new(ProxyCtl {
+        next_generation: AtomicU64::new(0),
+        ws_silenced_below: AtomicU64::new(0),
+        fail_deposits: AtomicUsize::new(0),
+        delay_deposits_ms: AtomicU64::new(0),
+    });
+    let upstream = upstream.to_string();
+    let ctl_accept = ctl.clone();
+    std::thread::spawn(move || {
+        for client in listener.incoming().flatten() {
+            let generation = ctl_accept.next_generation.fetch_add(1, Ordering::SeqCst);
+            let ctl = ctl_accept.clone();
+            let upstream = upstream.clone();
+            std::thread::spawn(move || proxy_connection(client, &upstream, generation, &ctl));
+        }
+    });
+    Proxy { port, ctl }
+}
+
+/// If `chunk` opens a deposit POST while deposit failures are armed, answers
+/// `503` on the client socket, closes it, and reports `true` (the chunk must
+/// not be forwarded). Inspected on every client→relay chunk, so a pooled
+/// keep-alive connection is covered as well as a fresh one.
+fn maybe_fail_deposit(chunk: &[u8], client: &mut TcpStream, ctl: &Arc<ProxyCtl>) -> bool {
+    let head = String::from_utf8_lossy(chunk);
+    let request_line = head.lines().next().unwrap_or("");
+    let is_deposit = request_line.starts_with("POST ") && request_line.contains("/messages ");
+    if !is_deposit {
+        return false;
+    }
+    loop {
+        let remaining = ctl.fail_deposits.load(Ordering::SeqCst);
+        if remaining == 0 {
+            return false;
+        }
+        if ctl
+            .fail_deposits
+            .compare_exchange(remaining, remaining - 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            let _ = client.write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+            let _ = client.flush();
+            let _ = client.shutdown(std::net::Shutdown::Both);
+            return true;
+        }
+    }
+}
+
+/// Holds a deposit POST for the armed delay before it is forwarded; other
+/// requests pass straight through.
+fn maybe_delay_deposit(chunk: &[u8], ctl: &Arc<ProxyCtl>) {
+    let ms = ctl.delay_deposits_ms.load(Ordering::SeqCst);
+    if ms == 0 {
+        return;
+    }
+    let head = String::from_utf8_lossy(chunk);
+    let request_line = head.lines().next().unwrap_or("");
+    if request_line.starts_with("POST ") && request_line.contains("/messages ") {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
+}
+
+fn proxy_connection(mut client: TcpStream, upstream: &str, generation: u64, ctl: &Arc<ProxyCtl>) {
+    let mut first = vec![0u8; 16 * 1024];
+    let n = match client.read(&mut first) {
+        Ok(0) | Err(_) => return,
+        Ok(n) => n,
+    };
+    first.truncate(n);
+    let head = String::from_utf8_lossy(&first);
+    let request_line = head.lines().next().unwrap_or("");
+    let is_ws = request_line.starts_with("GET ") && request_line.contains("/ws ");
+    if maybe_fail_deposit(&first, &mut client, ctl) {
+        return;
+    }
+    maybe_delay_deposit(&first, ctl);
+
+    let Ok(mut server) = TcpStream::connect(upstream) else {
+        return;
+    };
+    if server.write_all(&first).is_err() {
+        return;
+    }
+    let mut client_rx = client.try_clone().expect("clone client");
+    let mut server_tx = server.try_clone().expect("clone server");
+    let ctl_up = ctl.clone();
+    let up = std::thread::spawn(move || {
+        pump(
+            &mut client_rx,
+            &mut server_tx,
+            is_ws,
+            generation,
+            &ctl_up,
+            true,
+        );
+        let _ = server_tx.shutdown(std::net::Shutdown::Both);
+    });
+    pump(&mut server, &mut client, is_ws, generation, ctl, false);
+    let _ = client.shutdown(std::net::Shutdown::Both);
+    let _ = up.join();
+}
+
+/// Copies `from` → `to` until EOF. While a WebSocket connection is silenced
+/// the bytes are read and dropped instead, so the socket stays open and dead.
+/// On the client→relay direction every chunk is also checked for an armed
+/// deposit failure.
+fn pump(
+    from: &mut TcpStream,
+    to: &mut TcpStream,
+    is_ws: bool,
+    generation: u64,
+    ctl: &Arc<ProxyCtl>,
+    client_to_relay: bool,
+) {
+    let mut buf = vec![0u8; 16 * 1024];
+    loop {
+        let n = match from.read(&mut buf) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => n,
+        };
+        let silenced = is_ws && generation < ctl.ws_silenced_below.load(Ordering::SeqCst);
+        if silenced {
+            continue;
+        }
+        if client_to_relay && maybe_fail_deposit(&buf[..n], from, ctl) {
+            let _ = to.shutdown(std::net::Shutdown::Both);
+            return;
+        }
+        if client_to_relay {
+            maybe_delay_deposit(&buf[..n], ctl);
+        }
+        if to.write_all(&buf[..n]).is_err() {
+            return;
+        }
+    }
+}
