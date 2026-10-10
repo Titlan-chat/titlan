@@ -59,7 +59,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+      # rustup reads the pinned toolchain from rust-toolchain.toml
+      - run: rustup toolchain install
+      # cargo-deny as a cached `cargo install` (the pattern cargo-audit below
+      # already uses), not the Docker action: that action builds its container
+      # from rust:<ver>-alpine pulled unauthenticated from Docker Hub on every
+      # run and fails on the Hub's pull limit (429) and token outages (504) —
+      # PR #72 run 37991981771, both attempts. 0.20.2 is the version the action
+      # pinned at 3c63498. deny.toml carries [graph] all-features = true, so
+      # plain `check` keeps the action's `--all-features` scope.
+      - uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny check
       - uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3
         with:
           tool: cargo-audit

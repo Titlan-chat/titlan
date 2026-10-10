@@ -5,8 +5,11 @@ package app.titlan.sync
 
 import android.content.Context
 import android.content.Intent
+import android.os.Looper
 import android.os.UserManager
 import app.titlan.core.AppCore
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -22,6 +25,23 @@ object SyncController {
 
     @Volatile
     private var pendingEvents: SyncEvents? = null
+
+    /**
+     * Finding F-N: the most recent start's foreground obligation. Counted
+     * down by [SyncService] on the main thread the moment `startForeground()`
+     * has been called — or the start has been declined (`stopSelf` inside
+     * `onStartCommand`, which clears the obligation the same way). [stop]
+     * waits on it before `stopService`: Android P+ crashes the process when a
+     * service started with `startForegroundService` is stopped while still
+     * "waiting for start foreground" (`ForegroundServiceDidNotStartInTimeException`),
+     * and nothing else orders a caller's `stopService` after the service's
+     * own main-thread `onStartCommand`. A sticky revival has no latch.
+     */
+    @Volatile
+    private var foregroundSettled: CountDownLatch? = null
+
+    /** Upper bound on the wait in [stop]: the platform's own foreground-start budget. */
+    private const val FOREGROUND_SETTLE_TIMEOUT_MS = 10_000L
 
     /**
      * Starts receive-sync: launches the foreground [SyncService] (gated on
@@ -40,6 +60,7 @@ object SyncController {
             return
         }
         pendingEvents = events
+        foregroundSettled = CountDownLatch(1)
         context.startForegroundService(Intent(context, SyncService::class.java))
         running.set(true)
     }
@@ -73,16 +94,49 @@ object SyncController {
      * is engine-global and replaced on each start).
      */
     internal fun onServiceForegrounded() {
-        AppCore.get().startSync(pendingEvents ?: DefaultSyncEvents)
-        running.set(true)
+        synchronized(this) {
+            // F-N: a stop that landed between startForeground() and this
+            // thread reaching the core must win — otherwise the core engine
+            // would start with no service above it. Both paths take this
+            // lock, so the order is decided here, once.
+            if (!running.get()) return
+            AppCore.get().startSync(pendingEvents ?: DefaultSyncEvents)
+            running.set(true)
+        }
     }
 
-    /** Stops all sync tasks and tears the foreground service down. */
+    /**
+     * [SyncService] → here, on the main thread, once the latest start's
+     * foreground obligation is settled either way (F-N). No latch (a sticky
+     * revival, or a start declined before `startForegroundService`): no-op.
+     */
+    internal fun onForegroundSettled() {
+        foregroundSettled?.countDown()
+    }
+
+    /**
+     * Stops all sync tasks and tears the foreground service down. Waits for
+     * the latest start's foreground obligation to settle first (F-N): the
+     * service's `onStartCommand` runs on the main thread, so the wait is
+     * skipped there (it would deadlock) — no production caller stops from
+     * the main thread.
+     */
     fun stop(context: Context) {
-        AppCore.get().stopSync()
-        context.stopService(Intent(context, SyncService::class.java))
-        running.set(false)
-        pendingEvents = null
+        awaitForegroundSettled()
+        synchronized(this) {
+            running.set(false)
+            AppCore.get().stopSync()
+            context.stopService(Intent(context, SyncService::class.java))
+            pendingEvents = null
+        }
+    }
+
+    private fun awaitForegroundSettled() {
+        val latch = foregroundSettled ?: return
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            latch.await(FOREGROUND_SETTLE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        }
+        foregroundSettled = null
     }
 
     /** True while the foreground [SyncService] is running. */
