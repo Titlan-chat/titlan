@@ -37,9 +37,12 @@ class SyncService : Service() {
         // also clears the startForeground obligation, so no crash) and return
         // NOT_STICKY (no revival spin against sealed storage). Nothing is
         // logged (INV-1). The app layer retries on ACTION_USER_UNLOCKED (4b-3).
+        // Either way the start's foreground obligation is settled here, and
+        // SyncController.stop waits for exactly that before stopService (F-N).
         val userManager = getSystemService(UserManager::class.java)
         if (userManager != null && !userManager.isUserUnlocked) {
             stopSelf(startId)
+            SyncController.onForegroundSettled()
             return START_NOT_STICKY
         }
         ensureChannel()
@@ -48,6 +51,7 @@ class SyncService : Service() {
             buildNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
+        SyncController.onForegroundSettled()
         // Now in the foreground: start the core sync engine (frozen §1) — off
         // the main thread, because the first start opens SQLCipher and may
         // generate the device identity (Kyber keygen), well past ANR budget.
