@@ -296,7 +296,16 @@ conditions the measurement did not cover. Record: 4b-2 freeze §9(f) via
 `docs/checklists/4b2-f-doze-latency.md`; evidence of record PR #20 (PASSED
 2026-07-28; ledger item 9). There are no per-message notifications at spec
 1.0 (messages appear when the app is opened) — a deferral ledgered as its own
-post-MVP design gate (4b-2 freeze §7).
+post-MVP design gate (4b-2 freeze §7). **Finding F-L (unit 5e-1b):** an idle
+subscription dropped silently by the network path was undetectable (no
+keepalive, no read deadline) and stranded both directions until a reconnect
+that nothing triggered; MITIGATED by the client keepalive (Ping after an
+interval of silence, Pong deadline, dead socket → the existing reconnect) and
+the keepalive-tick retry of pending sends —
+`tezca-core/src/relay_client/ws.rs :: keepalive_missing_pong_is_a_transport_error`,
+`tezca-relay/tests/relay_client_e2e.rs :: silent_socket_is_detected_and_resubscribed`,
+`tezca-relay/tests/relay_client_e2e.rs :: pending_send_flushes_on_keepalive_tick_without_reconnect`;
+on device, release-checklist §0/§8 "Idle-socket round trip (F-L)".
 
 ### TM-C8 — Unbounded network I/O (availability)
 
@@ -381,7 +390,10 @@ a host intruder), necessarily observes:
   opaque, but stable for the life of a mailbox, so they name a
   conversation-direction over time.
 - **Timing** — every deposit and every WebSocket delivery, with the source
-  IP of the depositor and the subscriber's connection. A deposit into
+  IP of the depositor and the subscriber's connection. Since unit 5e-1b the
+  subscriber also sends a constant-size, payload-free Ping after each
+  interval of silence: a constant-rate presence signal per subscription,
+  adding nothing beyond the connection's existence the relay already sees. A deposit into
   mailbox X from address A followed by delivery to a subscriber at address B
   links A and B for that mailbox; repeated over time this reconstructs
   who-talks-to-whom, message frequency, and online presence, without any

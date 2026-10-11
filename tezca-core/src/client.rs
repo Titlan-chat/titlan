@@ -16,6 +16,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::runtime::Runtime;
 
 use crate::Result;
+use crate::config::TransportTiming;
 use crate::relay_client::Engine;
 use crate::storage::{DbKey, Store, StoredMessage};
 
@@ -141,11 +142,39 @@ impl TitlanClient {
     /// Returns [`CoreError::BadDbKey`] for a wrong database key and
     /// [`CoreError::Storage`] for any other open or migration failure.
     pub fn open(path: &Path, key: &DbKey, my_relay_url: &str) -> Result<TitlanClient> {
+        Self::open_timed(path, key, my_relay_url, TransportTiming::production())
+    }
+
+    /// [`Self::open`] with injected transport timing — keepalive interval and
+    /// grace, HTTP timeouts (unit 5e-1b, F-L). Dev scope only: compiled solely
+    /// under the `test-relay-anchor` feature so the shipped library carries
+    /// exactly one timing, the production constants in `config`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::open`].
+    #[cfg(feature = "test-relay-anchor")]
+    pub fn open_with_timing(
+        path: &Path,
+        key: &DbKey,
+        my_relay_url: &str,
+        timing: TransportTiming,
+    ) -> Result<TitlanClient> {
+        Self::open_timed(path, key, my_relay_url, timing)
+    }
+
+    fn open_timed(
+        path: &Path,
+        key: &DbKey,
+        my_relay_url: &str,
+        timing: TransportTiming,
+    ) -> Result<TitlanClient> {
         let store = Arc::new(Store::open(path, key)?);
         let engine = Engine::new(
             store.clone(),
             my_relay_url.to_owned(),
             shared_runtime().handle().clone(),
+            timing,
         )?;
         Ok(TitlanClient { store, engine })
     }

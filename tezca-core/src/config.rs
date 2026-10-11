@@ -32,6 +32,92 @@ pub const MAX_OFFER_TTL_S: u32 = 86_400;
 /// `NotYetValid` (§4 step 3).
 pub const FUTURE_SKEW_S: u64 = 300;
 
+// --- Transport keepalive and bounded relay I/O (unit 5e-1b, finding F-L;
+// freeze `docs/design/2026-10-transport-keepalive-freeze.md` KA-D2 / KA-D4)
+// — the SINGLE source for every subscription and every relay HTTP call. A
+// relay subscription that nobody exercises dies silently on real networks
+// (NAT, carrier, emulator) while the client keeps reporting `Online`; the
+// client therefore pings after KEEPALIVE_INTERVAL_S of silence and treats a
+// Pong missing after KEEPALIVE_GRACE_S as a dead socket. ---------------------
+
+/// Silence on a relay subscription before the client sends a WebSocket Ping.
+pub const KEEPALIVE_INTERVAL_S: u64 = 55;
+
+/// Pong deadline after a client Ping; a miss is a dead subscription.
+pub const KEEPALIVE_GRACE_S: u64 = 10;
+
+/// TCP/TLS connect timeout for relay HTTP calls (mailbox create, deposit,
+/// retire).
+pub const HTTP_CONNECT_TIMEOUT_S: u64 = 10;
+
+/// Whole-request timeout for relay HTTP calls; bounds `send_chat`'s inline
+/// deposit attempt and every pairing-flow HTTP step.
+pub const HTTP_REQUEST_TIMEOUT_S: u64 = 30;
+
+/// Keepalive timing handed to every subscription. Production is the two
+/// constants above; integration tests inject short values through the
+/// dev-scope constructor (see `TitlanClient::open_with_timing`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeepaliveTiming {
+    /// Silence before a Ping.
+    pub interval: std::time::Duration,
+    /// Pong deadline after a Ping.
+    pub grace: std::time::Duration,
+}
+
+impl KeepaliveTiming {
+    /// The production timing (`KEEPALIVE_INTERVAL_S` / `KEEPALIVE_GRACE_S`).
+    #[must_use]
+    pub const fn production() -> Self {
+        Self {
+            interval: std::time::Duration::from_secs(KEEPALIVE_INTERVAL_S),
+            grace: std::time::Duration::from_secs(KEEPALIVE_GRACE_S),
+        }
+    }
+}
+
+/// Relay HTTP client timeouts. Production is the two constants above.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpTimeouts {
+    /// Connect timeout.
+    pub connect: std::time::Duration,
+    /// Whole-request timeout.
+    pub request: std::time::Duration,
+}
+
+impl HttpTimeouts {
+    /// The production timeouts (`HTTP_CONNECT_TIMEOUT_S` /
+    /// `HTTP_REQUEST_TIMEOUT_S`).
+    #[must_use]
+    pub const fn production() -> Self {
+        Self {
+            connect: std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_S),
+            request: std::time::Duration::from_secs(HTTP_REQUEST_TIMEOUT_S),
+        }
+    }
+}
+
+/// Everything the relay engine needs to bound its I/O: keepalive timing for
+/// subscriptions and timeouts for HTTP. One value per `TitlanClient`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransportTiming {
+    /// Subscription keepalive.
+    pub keepalive: KeepaliveTiming,
+    /// Relay HTTP timeouts.
+    pub http: HttpTimeouts,
+}
+
+impl TransportTiming {
+    /// The production timing.
+    #[must_use]
+    pub const fn production() -> Self {
+        Self {
+            keepalive: KeepaliveTiming::production(),
+            http: HttpTimeouts::production(),
+        }
+    }
+}
+
 /// A padding profile: the set of allowed inner-frame bucket sizes.
 ///
 /// Resolved work order §10.2 (2026-07-14): default is 512 B / 2 KiB / 8 KiB,

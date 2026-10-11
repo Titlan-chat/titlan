@@ -48,9 +48,13 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
   expect: a QR filling the emulator's width; `Paired — conversation
   established` on the physical device within 60 s of the scan, and on the
   emulator within 10 s after that.
-  Direction B (link, F-E/F-F): "Pair a device", then "Show pairing offer" on
-  the physical device; paste its `titlan://pair#` link into the emulator's
-  paste field (`adb shell input text` is acceptable) and tap "Pair from link".
+  Direction B (link, F-E/F-F): after Direction A both devices sit in that
+  conversation — on each, Back, then "Pair a device". "Show pairing offer" on
+  the physical device; the emulator's paste field appears about 20 s after
+  its pairing screen opens (the scan timeout). Read the physical device's
+  `titlan://pair#` link fresh from its screen (a link read earlier names a
+  pairing inbox that may already be retired), paste it into the emulator's
+  field (`adb shell input text` is acceptable) and tap "Pair from link".
   expect: `Paired — conversation established` on the emulator within 60 s,
   and on the physical device within 10 s after that.
   Record both serials, `ro.build.fingerprint`, and the times of each
@@ -61,6 +65,12 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
   tap Send.
   expect: each message appears on the other device within 30 s of Send —
   right-aligned on the sender, left-aligned on the receiver.
+- WHERE: devices — Idle-socket round trip (F-L). Leave both devices in that
+  conversation, screens on, untouched for 15 minutes: no sends, no network
+  toggles, no app switching (the keepalive runs about sixteen rounds). Then
+  type the literal `titlan message idle` on the physical device and tap Send.
+  expect: `titlan message idle` appears on the emulator within 60 s of Send.
+  A message that arrives only after a network toggle is the F-L failure.
 - WHERE: devices — Airplane-mode round trip (5e-1). Airplane mode ON on the
   physical device (quick settings, or
   `adb -s <serial> shell cmd connectivity airplane-mode enable`); type the
@@ -209,6 +219,11 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
   the literal `titlan message A to B` sent from the first device, the literal
   `titlan message B to A` sent from the second.
   expect: each appears on the other device within 30 s of Send.
+- WHERE: devices — Idle-socket round trip (F-L): both devices left in that
+  conversation, screens on, untouched for 15 minutes; then the literal
+  `titlan message idle` sent from the first device.
+  expect: `titlan message idle` appears on the second device within 60 s of
+  Send, with no network toggle.
 - WHERE: devices — Airplane-mode round trip (5e-1): airplane mode ON on one
   device, the literal `titlan message offline` sent from it, airplane mode
   OFF.

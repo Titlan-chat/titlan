@@ -14,12 +14,14 @@ mod common;
 
 use std::sync::{Arc, Mutex};
 
-use common::{GENEROUS_LIMITS, deposit, free_port, spawn_relay_at, ws_next_message, ws_subscribe};
+use common::{
+    GENEROUS_LIMITS, deposit, free_port, spawn_relay_at, start_proxy, ws_next_message, ws_subscribe,
+};
 use tempfile::TempDir;
 use tezca_core::client::{
     ConnectionObserver, ConnectionState, ConversationId, MessageReceiver, TitlanClient,
 };
-use tezca_core::config::PaddingProfile;
+use tezca_core::config::{HttpTimeouts, KeepaliveTiming, PaddingProfile, TransportTiming};
 use tezca_core::envelope::{InnerFrame, PayloadType};
 use tezca_core::storage::{DbKey, Store, StoredMessage};
 use tezca_core::{CoreError, identity, session};
@@ -65,6 +67,9 @@ impl States {
             .expect("states")
             .iter()
             .any(|s| s == want)
+    }
+    fn saw_any(&self, pred: impl FnMut(&ConnectionState) -> bool) -> bool {
+        self.states.lock().expect("states").iter().any(pred)
     }
     fn saw_needs_repair(&self) -> bool {
         self.needs_repair.load(std::sync::atomic::Ordering::SeqCst)
@@ -657,11 +662,208 @@ fn scanner_session_cannot_decrypt_third_party_blob() {
 }
 
 /// Opens + initializes a bare tezca-core store (Phase-2 crypto only).
+/// Short transport timing for the F-L tests: a dead socket is noticed in
+/// ~2 s, a stranded send retried within ~1 s, an HTTP call bounded at 2 s.
+const FAST_TRANSPORT: TransportTiming = TransportTiming {
+    keepalive: KeepaliveTiming {
+        interval: std::time::Duration::from_secs(1),
+        grace: std::time::Duration::from_secs(1),
+    },
+    http: HttpTimeouts {
+        connect: std::time::Duration::from_secs(2),
+        request: std::time::Duration::from_secs(2),
+    },
+};
+
+fn new_timed_client(dir: &TempDir, name: &str, relay_url: &str) -> TitlanClient {
+    let key = DbKey::generate();
+    let client =
+        TitlanClient::open_with_timing(&dir.path().join(name), &key, relay_url, FAST_TRANSPORT)
+            .expect("open TitlanClient");
+    client.initialize_identity().expect("init identity");
+    client
+}
+
+/// Finding F-L (unit 5e-1b, KA-D1/KA-D2): a subscription whose path goes
+/// silent — bytes in, nothing back, socket still open — must be noticed by the
+/// client's keepalive and replaced, so a message deposited meanwhile arrives
+/// without anyone toggling the network. Before the fix the listener sits in
+/// `next()` forever and the observer's last word stays `Online`.
+#[test]
+fn silent_socket_is_detected_and_resubscribed() {
+    let dir = TempDir::new().unwrap();
+    let (relay, _d) = common::spawn_relay(GENEROUS_LIMITS);
+    let proxy = start_proxy(&relay.base());
+    let url = format!("ws://{}", proxy.base());
+
+    let alice = new_timed_client(&dir, "alice.db", &url); // offerer
+    let bob = new_timed_client(&dir, "bob.db", &url); // responder
+    let alice_states = Arc::new(States::default());
+    let alice_rx = Arc::new(Inbox::default());
+    let bob_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(alice_states.clone(), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(Arc::new(States::default()), bob_rx.clone())
+        .unwrap();
+
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    bob.send_chat(&conv_b, "before silence").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"before silence".to_string()));
+    assert!(alice_states.saw(&ConnectionState::Online));
+
+    // The path under Alice's live subscriptions goes dark; nothing closes.
+    proxy.silence_existing_ws();
+    bob.send_chat(&conv_b, "after silence").unwrap();
+
+    // Keepalive: Alice's listener must notice (Offline → Backoff), reconnect
+    // through the proxy on a fresh connection, and receive the strand.
+    wait_for(
+        || alice_states.saw(&ConnectionState::Offline),
+        "the keepalive must notice the dead socket (Offline)",
+    );
+    wait_for(
+        || alice_rx.texts().contains(&"after silence".to_string()),
+        "the strand must arrive on the fresh subscription",
+    );
+    assert!(
+        alice_states.saw_any(|s| matches!(s, ConnectionState::Backoff { .. })),
+        "the dead socket must go through the ordinary reconnect path"
+    );
+    drop(relay);
+}
+
+/// Finding F-L (KA-D3): a deposit that fails while the subscription stays
+/// alive is retried on the next keepalive tick — the message must not wait
+/// for a reconnect that nothing triggers, and no reconnect may be forced to
+/// achieve it (the observer never sees `Offline`).
+#[test]
+fn pending_send_flushes_on_keepalive_tick_without_reconnect() {
+    let dir = TempDir::new().unwrap();
+    let (relay, _d) = common::spawn_relay(GENEROUS_LIMITS);
+    let proxy = start_proxy(&relay.base());
+    let url = format!("ws://{}", proxy.base());
+
+    let alice = new_timed_client(&dir, "alice.db", &url); // offerer
+    let bob = new_timed_client(&dir, "bob.db", &url); // responder
+    let bob_states = Arc::new(States::default());
+    let alice_rx = Arc::new(Inbox::default());
+    let bob_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(bob_states.clone(), bob_rx.clone()).unwrap();
+
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    bob.send_chat(&conv_b, "warm").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"warm".to_string()));
+
+    // The next deposit is refused at the edge; Bob's socket is untouched.
+    proxy.fail_next_deposits(1);
+    bob.send_chat(&conv_b, "retried on tick").unwrap();
+    assert!(
+        bob.messages(&conv_b)
+            .unwrap()
+            .iter()
+            .any(|m| m.body == b"retried on tick"),
+        "the message must be held locally after the refused deposit"
+    );
+
+    wait_for(
+        || alice_rx.texts().contains(&"retried on tick".to_string()),
+        "the stranded send must flush on a keepalive tick",
+    );
+    assert!(
+        !bob_states.saw(&ConnectionState::Offline),
+        "the retry must ride the keepalive tick, not a reconnect"
+    );
+    drop(relay);
+}
+
+/// Finding F-M (KA-D11): a pending message is deposited exactly once even
+/// when two flush paths overlap. Two sends 200 ms apart while the proxy holds
+/// every deposit for 800 ms — the chat screen's Send button launches each tap
+/// on its own IO coroutine, so this is the production shape of a quick second
+/// message on a slow link. Without per-conversation flush serialization the
+/// second send's flush reads the first row (still `pending`, its deposit in
+/// flight), encrypts it again and deposits it again; the peer then persists
+/// the first message twice. The same overlap exists between the inline send
+/// and the connect-time flush, and (KA-D3) the keepalive tick's flush.
+#[test]
+fn two_quick_sends_deposit_each_message_once() {
+    let dir = TempDir::new().unwrap();
+    let (relay, _d) = common::spawn_relay(GENEROUS_LIMITS);
+    let proxy = start_proxy(&relay.base());
+    let url = format!("ws://{}", proxy.base());
+
+    let alice = new_timed_client(&dir, "alice.db", &url); // offerer
+    let bob = new_timed_client(&dir, "bob.db", &url); // responder
+    let bob_states = Arc::new(States::default());
+    let alice_rx = Arc::new(Inbox::default());
+    let bob_rx = Arc::new(Inbox::default());
+    alice
+        .start_sync(Arc::new(States::default()), alice_rx.clone())
+        .unwrap();
+    bob.start_sync(bob_states.clone(), bob_rx.clone()).unwrap();
+
+    let offer = alice.export_pairing_offer().unwrap();
+    let conv_b = bob.begin_pairing_from_offer(offer.as_bytes()).unwrap();
+    let conv_a = alice.list_conversations().unwrap()[0];
+    bob.send_chat(&conv_b, "warm").unwrap();
+    wait_until(|| alice_rx.texts().contains(&"warm".to_string()));
+
+    // Every deposit now takes 800 ms at the edge (under the 2 s request
+    // timeout), so the first send's deposit is still in flight when the
+    // second send starts its own flush.
+    proxy.delay_deposits(800);
+    std::thread::scope(|scope| {
+        scope.spawn(|| bob.send_chat(&conv_b, "first").unwrap());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        bob.send_chat(&conv_b, "second").unwrap();
+    });
+    wait_for(
+        || {
+            let t = alice_rx.texts();
+            t.contains(&"first".to_string()) && t.contains(&"second".to_string())
+        },
+        "both delayed deposits must arrive",
+    );
+    // Let a duplicate ciphertext, had one been deposited, arrive too.
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    let rows = alice.messages(&conv_a).unwrap();
+    for text in ["first", "second"] {
+        let n = rows.iter().filter(|m| m.body == text.as_bytes()).count();
+        assert_eq!(
+            n, 1,
+            "each message must be deposited once across concurrent sends ({text})"
+        );
+    }
+    assert!(
+        !bob_states.saw(&ConnectionState::Offline),
+        "the overlap is between live flush paths, not a reconnect"
+    );
+    drop(relay);
+}
+
 fn open_store(dir: &TempDir, name: &str) -> Store {
     let key = DbKey::generate();
     let store = Store::open(&dir.path().join(name), &key).expect("open store");
     identity::initialize(&store).expect("init identity");
     store
+}
+
+/// Polls a condition for up to ~10s, naming what was awaited on failure.
+fn wait_for(mut cond: impl FnMut() -> bool, what: &str) {
+    for _ in 0..200 {
+        if cond() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("not within 10 s: {what}");
 }
 
 /// Polls a condition for up to ~10s (green implementation delivers async).

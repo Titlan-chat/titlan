@@ -226,6 +226,27 @@ fn unacked_messages_are_redelivered_on_reconnect() {
 // whole-process RSS, which is disturbed by transient allocator high-water
 // when dozens of other test processes hammer the machine at once. CI runs it
 // in isolation (a dedicated single-test step) so the measurement is clean.
+/// Unit 5e-1b (finding F-L), KA-D1: the client's keepalive relies on the relay
+/// answering a WebSocket Ping with a Pong carrying the same payload — RFC 6455
+/// §5.5.3, which axum performs beneath the subscription handler. The relay
+/// source is untouched by that unit; this test pins the assumption so a future
+/// relay change that stops answering Pings fails here, not on a phone.
+#[test]
+fn ws_ping_is_answered_with_pong() {
+    let (relay, _dir) = spawn_relay(GENEROUS_LIMITS);
+    let base = relay.base();
+    let id = create_mailbox_id(&base);
+    let mut ws = ws_subscribe(&base, &id).expect("subscribe");
+    ws.send(tungstenite::Message::Ping(b"ka".to_vec().into()))
+        .expect("send ping");
+    let reply = ws.read().expect("read pong");
+    assert!(
+        matches!(reply, tungstenite::Message::Pong(ref p) if p.as_ref() == b"ka"),
+        "expected Pong(\"ka\"), got {reply:?}"
+    );
+    drop(relay);
+}
+
 #[test]
 #[ignore = "RSS-sensitive; run in isolation (see CI reproducible-build/memory step)"]
 fn memory_stays_flat_under_sustained_load() {

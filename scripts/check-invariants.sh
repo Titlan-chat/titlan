@@ -1157,9 +1157,118 @@ else
   fi
 fi
 
+# --- 21. Transport keepalive (5e-1b, finding F-L) ----------------------------
+# The subscription keepalive and bounded relay I/O unit
+# (docs/design/2026-10-transport-keepalive-freeze.md): the client pings after an
+# interval of silence from exactly one site, timed by constants that live in
+# config.rs (21a); every relay HTTP call is bounded by connect + request
+# timeouts on the one reqwest builder (21b); the listener retries pending
+# sends on the keepalive tick (21c); the checklist proves an idle socket on
+# device (21d); the freeze is on the tree, Apache-2.0, hash-chained (21e); the
+# tests that pin the relay's auto-Pong and the three e2e behaviours exist
+# (21f); the timing seam is dev-scope only (21g). Containment (21h) is
+# asserted by the unit's order against its base commit, not here. Pending
+# sends are flushed under a per-conversation guard, so overlapping flush
+# paths never deposit one row twice (21i, finding F-M, KA-D11).
+ka_ws="tezca-core/src/relay_client/ws.rs"
+ka_mod="tezca-core/src/relay_client/mod.rs"
+ka_cfg="tezca-core/src/config.rs"
+ka_client="tezca-core/src/client.rs"
+ka_freeze="docs/design/2026-10-transport-keepalive-freeze.md"
+# 21a. One keepalive site; constants single-sourced.
+ka_ping_sites=$({ grep -rc 'send(Message::Ping(' tezca-core/src || true; } | awk -F: '$2>0{s+=$2} END{print s+0}')
+if [ "$ka_ping_sites" -ne 1 ]; then
+  echo "transport keepalive 21a: exactly one keepalive Ping site under tezca-core/src (found $ka_ping_sites)"
+  fail=1
+fi
+if ! grep -qF 'send(Message::Ping(' "$ka_ws" 2>/dev/null; then
+  echo "transport keepalive 21a: the keepalive Ping must be sent from $ka_ws"
+  fail=1
+fi
+for ka_const in KEEPALIVE_INTERVAL_S KEEPALIVE_GRACE_S HTTP_CONNECT_TIMEOUT_S HTTP_REQUEST_TIMEOUT_S; do
+  ka_defs=$({ grep -rc "pub const $ka_const: u64 = " tezca-core/src || true; } | awk -F: '$2>0{s+=$2} END{print s+0}')
+  if [ "$ka_defs" -ne 1 ] || ! grep -q "pub const $ka_const: u64 = " "$ka_cfg"; then
+    echo "transport keepalive 21a: $ka_const must be defined exactly once, in $ka_cfg (found $ka_defs)"
+    fail=1
+  fi
+done
+# 21b. Bounded relay HTTP on the single reqwest builder.
+ka_builders=$({ grep -rc 'reqwest::Client::builder()' tezca-core/src || true; } | awk -F: '$2>0{s+=$2} END{print s+0}')
+if [ "$ka_builders" -ne 1 ]; then
+  echo "transport keepalive 21b: exactly one reqwest::Client::builder() under tezca-core/src (found $ka_builders)"
+  fail=1
+fi
+ka_builder_body=$(awk '/pub\(crate\) fn build_http_client\(/{p=1} p{print} p&&/^}/{exit}' "$ka_ws" 2>/dev/null)
+for ka_call in '.connect_timeout(' '.timeout('; do
+  if ! printf '%s\n' "$ka_builder_body" | grep -qF "$ka_call"; then
+    echo "transport keepalive 21b: build_http_client in $ka_ws must apply $ka_call (F-L: bounded relay I/O)"
+    fail=1
+  fi
+done
+# 21c. The conversation listener retries pending sends on the keepalive tick.
+if ! grep -A4 -F 'Ok(Some(Event::Idle)) => {' "$ka_mod" 2>/dev/null | grep -qF 'flush_pending'; then
+  echo "transport keepalive 21c: $ka_mod listener must call flush_pending on Event::Idle (KA-D3)"
+  fail=1
+fi
+# 21d. The checklist proves an idle socket on device, pre-tag and post-publish.
+for ka_sec in '## 0. Pre-tag device smoke' '## 8. Production-relay acceptance'; do
+  ka_block=$(awk -v s="$ka_sec" 'index($0,s)==1{p=1;next} /^## /{p=0} p' docs/release-checklist.md)
+  if ! printf '%s\n' "$ka_block" | grep -qF 'Idle-socket round trip (F-L)'; then
+    echo "transport keepalive 21d: docs/release-checklist.md section '$ka_sec' lacks the block: Idle-socket round trip (F-L)"
+    fail=1
+  fi
+done
+# 21e. The freeze is on the tree, Apache-2.0, hash-chained to the 5e-1 freeze.
+if [ ! -f "$ka_freeze" ]; then
+  echo "transport keepalive 21e: MISSING $ka_freeze"
+  fail=1
+else
+  if [ "$(head -5 "$ka_freeze" | grep -cF 'SPDX-License-Identifier: Apache-2.0' || true)" -lt 1 ]; then
+    echo "transport keepalive 21e: $ka_freeze lacks the Apache-2.0 SPDX header"
+    fail=1
+  fi
+  if ! grep -qF 'ca0d85c95b5d67f8184505954744a1b8016c37e462c3c6bdee7a5132583472f8' "$ka_freeze"; then
+    echo "transport keepalive 21e: $ka_freeze lacks the hash-chain predecessor (5e-1 freeze whole-file sha256 ca0d85c9…72f8)"
+    fail=1
+  fi
+fi
+# 21f. The pinning tests exist.
+if ! grep -qF 'fn ws_ping_is_answered_with_pong' tezca-relay/tests/relay_lifecycle.rs; then
+  echo "transport keepalive 21f: tezca-relay/tests/relay_lifecycle.rs must pin the relay's auto-Pong (ws_ping_is_answered_with_pong)"
+  fail=1
+fi
+for ka_t in silent_socket_is_detected_and_resubscribed pending_send_flushes_on_keepalive_tick_without_reconnect two_quick_sends_deposit_each_message_once; do
+  if ! grep -qF "fn $ka_t" tezca-relay/tests/relay_client_e2e.rs; then
+    echo "transport keepalive 21f: tezca-relay/tests/relay_client_e2e.rs lacks the pinning test $ka_t"
+    fail=1
+  fi
+done
+# 21g. The timing seam is dev-scope only: the shipped library carries exactly
+#      the production timing.
+if ! grep -B1 -F 'pub fn open_with_timing(' "$ka_client" 2>/dev/null | grep -qF '#[cfg(feature = "test-relay-anchor")]'; then
+  echo "transport keepalive 21g: TitlanClient::open_with_timing in $ka_client must be gated by #[cfg(feature = \"test-relay-anchor\")]"
+  fail=1
+fi
+# 21i. Pending sends are flushed under a per-conversation guard (F-M): the one
+#      flush_pending body acquires it before reading pending rows.
+ka_flush_body=$(awk '/async fn flush_pending\(/{p=1} p{print} p&&/^    }$/{exit}' "$ka_mod" 2>/dev/null)
+ka_flush_fns=$({ grep -rc 'async fn flush_pending(' tezca-core/src || true; } | awk -F: '$2>0{s+=$2} END{print s+0}')
+if [ "$ka_flush_fns" -ne 1 ]; then
+  echo "transport keepalive 21i: exactly one flush_pending under tezca-core/src (found $ka_flush_fns)"
+  fail=1
+fi
+if ! printf '%s\n' "$ka_flush_body" | grep -qF 'let _flush_guard = '; then
+  echo "transport keepalive 21i: flush_pending in $ka_mod must hold the per-conversation flush guard (F-M, KA-D11)"
+  fail=1
+fi
+if ! printf '%s\n' "$ka_flush_body" | awk '/let _flush_guard = /{g=NR} /pending_chat\(/{if(!g){exit 1}}'; then
+  echo "transport keepalive 21i: flush_pending in $ka_mod must acquire the guard before reading pending rows"
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b))."

@@ -55,6 +55,17 @@ A second subscriber to the same mailbox replaces the first (the older
 connection closes) — device-restart semantics. Delivery/ack frames carry no
 version byte; their evolution hook is the `/v1/` URL prefix (Horizon §H4.2).
 
+Keepalive (unit 5e-1b, finding F-L): an idle subscription can be dropped
+silently by the network path (NAT, carrier, emulator) while both ends believe
+it open. A client SHOULD send a WebSocket Ping (RFC 6455 §5.5.2, empty
+payload) after an interval of silence and MUST treat a Pong not received
+within a grace period as a dead subscription — reconnecting through the
+ordinary path, after which unacked messages replay. The relay answers Pings
+with Pongs (§5.5.3) and attaches no meaning to them: a Ping carries no
+identity, is not logged, and is not an application frame (INV-2). The
+reference client's interval and grace are configuration constants
+(`tezca-core/src/config.rs`); the relay places no requirement on them.
+
 Frames (binary):
 - server → client delivery: `0x01 || message_id(16) || envelope`
 - client → server ack: `0x02 || message_id(16)` → the relay deletes that
