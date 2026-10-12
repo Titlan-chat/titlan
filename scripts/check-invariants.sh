@@ -1266,9 +1266,66 @@ if ! printf '%s\n' "$ka_flush_body" | awk '/let _flush_guard = /{g=NR} /pending_
   fail=1
 fi
 
+# --- 22. CI build environment pinned (runner image + JDK) --------------------
+# The CI and release builds run on the same OS and JDK as the VM that
+# reproduces them (release checklist §5): GitHub moves the `ubuntu-latest`
+# label to Ubuntu 26.04 between 2026-10-19 and 2026-11-19, and an unpinned JDK
+# patch level once changed the APK (finding F-B). Every workflow job pins the
+# runner image (22a), every setup-java step pins the exact Temurin build (22b),
+# and docs/build.md states the pin (22c). Moving either pin is a deliberate,
+# gated unit — never a drive-by edit.
+ci_runner='ubuntu-24.04'
+ci_jdk='17.0.20+1'
+ci_jdk_self='17.0.20.1'
+ci_wf=$(list_files | grep -E '^\.github/workflows/[^/]+\.ya?ml$' || true)
+ci_runs=0
+ci_jdks=0
+if [ -z "$ci_wf" ]; then
+  echo "CI environment 22a: no workflow files under .github/workflows"
+  fail=1
+fi
+while IFS= read -r ci_f; do
+  [ -n "$ci_f" ] || continue
+  # 22a. Every job pins the runner image.
+  while IFS= read -r ci_l; do
+    ci_runs=$((ci_runs + 1))
+    ci_n=${ci_l%%:*}
+    ci_v=$(printf '%s' "${ci_l#*:}" | sed -E 's/^[[:space:]]*runs-on:[[:space:]]*//; s/[[:space:]]+$//')
+    if [ "$ci_v" != "$ci_runner" ]; then
+      echo "CI environment 22a: $ci_f:$ci_n runs-on must be $ci_runner (found: $ci_v)"
+      fail=1
+    fi
+  done < <(grep -n 'runs-on:' "$ci_f" || true)
+  # 22b. Every setup-java step pins the exact Temurin build.
+  while IFS= read -r ci_l; do
+    ci_jdks=$((ci_jdks + 1))
+    ci_n=${ci_l%%:*}
+    ci_v=$(printf '%s' "${ci_l#*:}" | sed -E 's/^[[:space:]]*java-version:[[:space:]]*//; s/[[:space:]]+$//')
+    if [ "$ci_v" != "\"$ci_jdk\"" ]; then
+      echo "CI environment 22b: $ci_f:$ci_n java-version must be \"$ci_jdk\" (found: $ci_v)"
+      fail=1
+    fi
+  done < <(grep -n 'java-version:' "$ci_f" || true)
+done <<< "$ci_wf"
+if [ "$ci_runs" -eq 0 ]; then
+  echo "CI environment 22a: no runs-on lines found in .github/workflows"
+  fail=1
+fi
+if [ "$ci_jdks" -eq 0 ]; then
+  echo "CI environment 22b: no java-version lines found in .github/workflows"
+  fail=1
+fi
+# 22c. docs/build.md states the pinned JDK (both spellings of the one build).
+ci_doc_row=$(grep -E '^\| JDK \|' docs/build.md || true)
+if ! printf '%s\n' "$ci_doc_row" | grep -qF "$ci_jdk_self" \
+  || ! printf '%s\n' "$ci_doc_row" | grep -qF "$ci_jdk"; then
+  echo "CI environment 22c: docs/build.md JDK row must state $ci_jdk_self (setup-java: $ci_jdk)"
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK))."
