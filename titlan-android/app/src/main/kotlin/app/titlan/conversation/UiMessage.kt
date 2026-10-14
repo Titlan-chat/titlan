@@ -40,4 +40,7 @@ sealed interface SendOutcome {
     data object Queued : SendOutcome
 
     data class Rejected(val why: SendCheck) : SendOutcome
+
+    /** Core failed to persist it (5e-2, finding F-J); the screen restores the draft. */
+    data object Failed : SendOutcome
 }

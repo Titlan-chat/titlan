@@ -716,20 +716,26 @@ if [ -d site ]; then
       fail=1
     fi
   done
-  # 15h. Pre-release copy (RC-D8): the landing page carries the pre-release
-  #      sentence exactly once and still says there are no supported releases.
-  #      Counted on whitespace-flattened text so a re-wrap cannot hide it.
-  site_prerelease='Pre-release builds may appear on GitHub Releases marked pre-release; they are not supported.'
+  # 15h. Support statement (5e-2 gate E-2, the RC-D8 successor): the landing
+  #      page carries the support sentence exactly once and none of the
+  #      pre-release statements it replaced. The sentence names no version, so
+  #      it is true before and after a release publishes. Counted on
+  #      whitespace-flattened text so a re-wrap cannot hide it; grep -c reads
+  #      all of its input (no early-exit pipe under pipefail).
+  site_support='Only the latest release on GitHub Releases is supported; pre-releases are not.'
   if [ -f site/index.html ]; then
-    site_prerelease_n=$(tr '\n' ' ' < site/index.html | tr -s ' ' | grep -oF "$site_prerelease" | grep -c . || true)
-    if [ "$site_prerelease_n" -ne 1 ]; then
-      echo "site 15h: site/index.html must carry the pre-release sentence exactly once (found $site_prerelease_n): $site_prerelease"
+    site_flat=$(tr '\n' ' ' < site/index.html | tr -s ' ')
+    site_support_n=$(printf '%s\n' "$site_flat" | grep -oF "$site_support" | grep -c . || true)
+    if [ "$site_support_n" -ne 1 ]; then
+      echo "site 15h: site/index.html must carry the support sentence exactly once (found $site_support_n): $site_support"
       fail=1
     fi
-    if ! grep -qF 'There are no supported releases yet.' site/index.html; then
-      echo "site 15h: site/index.html no longer carries 'There are no supported releases yet.' (RC-D8 keeps it)"
-      fail=1
-    fi
+    for site_gone in 'no supported releases yet' 'Pre-release builds may appear on GitHub Releases marked pre-release; they are not supported.'; do
+      if [ "$(printf '%s\n' "$site_flat" | grep -cF "$site_gone" || true)" -gt 0 ]; then
+        echo "site 15h: site/index.html still carries a replaced pre-release statement: $site_gone"
+        fail=1
+      fi
+    done
   fi
 fi
 
@@ -836,28 +842,32 @@ else
   fail=1
 fi
 
-# --- 17. Release candidate (5d-2) ---------------------------------------------
+# --- 17. Release identity (5d-2, updated by 5e-2) ------------------------------
 # The release-candidate unit (docs/design/2026-09-release-candidate-freeze.md,
-# sequencing step 3), beyond the relay default (family 7) and the site copy
+# sequencing step 3), as updated for the first supported release (5e-2 gate
+# E-1/E-2/E-3), beyond the relay default (family 7) and the site copy
 # (15g/15h): the release checklist exists and its gate literals are pinned so
 # document and tooling cannot drift (RC-D6: signing flags, tag form, verify
-# commands); the release identity (RC-D4); SECURITY.md carries the same
-# pre-release sentence as the site (RC-D8); the README points at the
-# checklist; and release.yml's run log records who pushed the tag (RC-D10).
+# commands) and it carries no pre-release form; the release identity (RC-D4,
+# E-1); SECURITY.md carries the same support sentence as the site (E-2); the
+# README points at the checklist; and release.yml's run log records who pushed
+# the tag (RC-D10).
 # 17a. The checklist exists, Apache-2.0 (checklist class).
 rc_checklist=docs/release-checklist.md
 if [ ! -f "$rc_checklist" ]; then
-  echo "release candidate 17a: MISSING $rc_checklist (RC-D6)"
+  echo "release identity 17a: MISSING $rc_checklist (RC-D6)"
   fail=1
 elif [ "$(head -5 "$rc_checklist" | grep -cF 'SPDX-License-Identifier: Apache-2.0' || true)" -lt 1 ]; then
-  echo "release candidate 17a: $rc_checklist lacks the Apache-2.0 SPDX header"
+  echo "release identity 17a: $rc_checklist lacks the Apache-2.0 SPDX header"
   fail=1
 fi
 # 17b. Gate literals — each at least once. An absent checklist fails every
 #      literal (2>/dev/null), exactly as an absent site/ fails 15a per file.
-for rc_lit in 'v0.1.0-rc.2' \
+#      The tag is pinned by its definition sentence, not the bare `v0.1.0`
+#      (a substring of the `v0.1.0-rc.1` history the checklist keeps).
+for rc_lit in '`<tag>` is `v0.1.0`;' \
               '--v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --min-sdk-version 34' \
-              'gh release create v0.1.0-rc.2 --prerelease --verify-tag' \
+              'gh release create v0.1.0 --verify-tag --latest' \
               'gh attestation verify' \
               '--diff-apks' \
               'apksigner verify --print-certs' \
@@ -867,38 +877,53 @@ for rc_lit in 'v0.1.0-rc.2' \
               '## 0. Pre-tag device smoke' \
               'WHERE:'; do
   if ! grep -qF -- "$rc_lit" "$rc_checklist" 2>/dev/null; then
-    echo "release candidate 17b: $rc_checklist lacks the gate literal: $rc_lit"
+    echo "release identity 17b: $rc_checklist lacks the gate literal: $rc_lit"
     fail=1
   fi
 done
-# 17c. Release identity (RC-D4): versionName is exactly the RC form.
-if ! grep -qE '^[[:space:]]*versionName = "0\.1\.0-rc\.2"$' "$gradle_build"; then
-  echo "release candidate 17c: ${gradle_build} does not carry exactly versionName = \"0.1.0-rc.2\" (RC-D4)"
+#      No pre-release form survives in the checklist (E-1).
+for rc_gone in '--prerelease' 'v0.1.0-rc.2'; do
+  if [ "$(grep -cF -- "$rc_gone" "$rc_checklist" 2>/dev/null || true)" -gt 0 ]; then
+    echo "release identity 17b: $rc_checklist still carries the pre-release form: $rc_gone"
+    fail=1
+  fi
+done
+# 17c. Release identity (RC-D4, E-1): versionName is exactly the release form.
+if ! grep -qE '^[[:space:]]*versionName = "0\.1\.0"$' "$gradle_build"; then
+  echo "release identity 17c: ${gradle_build} does not carry exactly versionName = \"0.1.0\" (E-1)"
   fail=1
 fi
-if ! grep -qE '^[[:space:]]*versionCode = 2$' "$gradle_build"; then
-  echo "release candidate 17c: ${gradle_build} does not carry exactly versionCode = 2 (RC-D4: every tag increments it)"
+if ! grep -qE '^[[:space:]]*versionCode = 3$' "$gradle_build"; then
+  echo "release identity 17c: ${gradle_build} does not carry exactly versionCode = 3 (RC-D4: every tag increments it)"
   fail=1
 fi
-# 17d. SECURITY.md carries the 15h pre-release sentence exactly once (RC-D8).
-#      Same literal as 15h, counted on whitespace-flattened text: the
-#      paragraph is wrapped, so the sentence spans lines.
-rc_prerelease='Pre-release builds may appear on GitHub Releases marked pre-release; they are not supported.'
-rc_prerelease_n=$(tr '\n' ' ' < SECURITY.md | tr -s ' ' | grep -oF "$rc_prerelease" | grep -c . || true)
-if [ "$rc_prerelease_n" -ne 1 ]; then
-  echo "release candidate 17d: SECURITY.md must carry the pre-release sentence exactly once (found $rc_prerelease_n): $rc_prerelease"
+# 17d. SECURITY.md carries the 15h support sentence exactly once and none of
+#      the pre-release statements it replaced (E-2). Same literals as 15h,
+#      counted on whitespace-flattened text: the paragraph is wrapped, so a
+#      sentence spans lines.
+rc_support='Only the latest release on GitHub Releases is supported; pre-releases are not.'
+rc_security_flat=$(tr '\n' ' ' < SECURITY.md | tr -s ' ')
+rc_support_n=$(printf '%s\n' "$rc_security_flat" | grep -oF "$rc_support" | grep -c . || true)
+if [ "$rc_support_n" -ne 1 ]; then
+  echo "release identity 17d: SECURITY.md must carry the support sentence exactly once (found $rc_support_n): $rc_support"
   fail=1
 fi
+for rc_gone in 'no supported releases yet' 'Pre-release builds may appear on GitHub Releases marked pre-release; they are not supported.'; do
+  if [ "$(printf '%s\n' "$rc_security_flat" | grep -cF "$rc_gone" || true)" -gt 0 ]; then
+    echo "release identity 17d: SECURITY.md still carries a replaced pre-release statement: $rc_gone"
+    fail=1
+  fi
+done
 # 17e. README points at the checklist.
 if ! grep -qF '[docs/release-checklist.md](docs/release-checklist.md)' README.md; then
-  echo "release candidate 17e: README.md lacks the checklist link '[docs/release-checklist.md](docs/release-checklist.md)'"
+  echo "release identity 17e: README.md lacks the checklist link '[docs/release-checklist.md](docs/release-checklist.md)'"
   fail=1
 fi
 # 17f. release.yml echoes the actor so the run log records who pushed the tag
 #      (RC-D10). The literal is a GitHub expression, not a shell expansion.
 # shellcheck disable=SC2016
 if ! grep -qF 'echo "release.yml triggered by ${{ github.actor }}"' .github/workflows/release.yml; then
-  echo 'release candidate 17f: .github/workflows/release.yml lacks the actor echo: echo "release.yml triggered by ${{ github.actor }}" (RC-D10)'
+  echo 'release identity 17f: .github/workflows/release.yml lacks the actor echo: echo "release.yml triggered by ${{ github.actor }}" (RC-D10)'
   fail=1
 fi
 
@@ -1328,4 +1353,4 @@ if [ "$fail" -ne 0 ]; then
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release candidate (5d-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release identity (5e-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK))."

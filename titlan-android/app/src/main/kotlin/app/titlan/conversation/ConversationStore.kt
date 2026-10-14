@@ -91,6 +91,12 @@ object ConversationStore : SyncEvents {
         list
     }
 
+    /**
+     * 5e-2 (gate E-5, finding F-J): [app.titlan.core.AppCore.hasPairedConversation]
+     * off the main thread; null when core failed (the storage-error state is raised).
+     */
+    suspend fun probePaired(): Boolean? = TODO()
+
     /** Refreshes the list and, when given, one conversation (Activity ON_START). */
     suspend fun refreshAll(open: ConversationKey?) {
         refreshConversations()
