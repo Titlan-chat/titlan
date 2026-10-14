@@ -24,11 +24,8 @@ import app.titlan.conversation.ChatScreen
 import app.titlan.conversation.ConversationKey
 import app.titlan.conversation.ConversationListScreen
 import app.titlan.conversation.ConversationStore
-import app.titlan.core.AppCore
 import app.titlan.pairing.PairingScreen
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /** The three destinations of the single Activity (5e-1, freeze CU-D2). */
 sealed interface Screen {
@@ -58,9 +55,11 @@ private fun screenOf(tag: String?): Screen? = when {
  * for the list only when a conversation exists (otherwise the Activity
  * finishes).
  *
- * Both root-level reads are gated by [AppCore.hasPairedConversation], the
- * existence probe that opens nothing on a never-paired install — identity
- * stays lazily minted at first pairing (4b2-WO-launch-sync).
+ * Both root-level reads are gated by [ConversationStore.probePaired], which
+ * wraps `AppCore.hasPairedConversation` — the existence probe that opens
+ * nothing on a never-paired install, so identity stays lazily minted at first
+ * pairing (4b2-WO-launch-sync). A failed probe (null; 5e-2, finding F-J) opens
+ * the conversation list, where the storage-error banner shows.
  */
 @Composable
 fun TitlanRoot() {
@@ -69,9 +68,9 @@ fun TitlanRoot() {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        val paired = withContext(Dispatchers.IO) { AppCore.hasPairedConversation() }
-        if (paired) ConversationStore.refreshConversations()
-        if (tag == null) tag = if (paired) TAG_CONVERSATIONS else TAG_PAIRING
+        val paired = ConversationStore.probePaired()
+        if (paired == true) ConversationStore.refreshConversations()
+        if (tag == null) tag = if (paired == false) TAG_PAIRING else TAG_CONVERSATIONS
     }
 
     // CU-D3 refresh trigger: Activity ON_START re-reads the list and the open
@@ -81,7 +80,7 @@ fun TitlanRoot() {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
                 scope.launch {
-                    if (withContext(Dispatchers.IO) { AppCore.hasPairedConversation() }) {
+                    if (ConversationStore.probePaired() == true) {
                         ConversationStore.refreshAll((screen as? Screen.Chat)?.key)
                     }
                 }

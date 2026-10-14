@@ -127,7 +127,8 @@ fun ChatScreen(key: ConversationKey, onBack: () -> Unit, onPairAgain: () -> Unit
                     val text = draft
                     draft = ""
                     scope.launch {
-                        if (ConversationStore.send(key, text) is SendOutcome.Rejected) draft = text
+                        // Rejected or Failed (5e-2, F-J): nothing was queued, so the text comes back.
+                        if (ConversationStore.send(key, text) !is SendOutcome.Queued) draft = text
                     }
                 },
             ) { Text(stringResource(R.string.chat_send)) }
