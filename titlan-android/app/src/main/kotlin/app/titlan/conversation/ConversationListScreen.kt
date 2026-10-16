@@ -38,9 +38,12 @@ fun ConversationListScreen(onOpen: (ConversationKey) -> Unit, onPair: () -> Unit
     val keys by ConversationStore.conversations.collectAsState()
     val connection by ConversationStore.connection.collectAsState()
     val needsRepair by ConversationStore.needsRepair.collectAsState()
+    val storageError by ConversationStore.storageError.collectAsState()
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(16.dp)) {
         Text(stringResource(R.string.conversations_title), style = MaterialTheme.typography.titleMedium)
+        // 5e-2 (finding F-J): a failed store read lands here, so the banner shows here too.
+        if (storageError) Text(stringResource(R.string.chat_storage_error))
         Button(onClick = onPair) { Text(stringResource(R.string.conversations_pair_device)) }
         LazyColumn {
             items(keys, key = { it.hex }) { key ->

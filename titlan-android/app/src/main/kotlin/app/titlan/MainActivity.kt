@@ -11,8 +11,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import app.titlan.conversation.ConversationStore
-import app.titlan.core.AppCore
 import app.titlan.sync.SyncController
+import kotlinx.coroutines.runBlocking
 
 /**
  * The single Activity (5e-1, freeze CU-D2): it hosts [TitlanRoot], which
@@ -43,10 +43,14 @@ class MainActivity : ComponentActivity() {
         // reference. This never runs pre-unlock at BFU: MainActivity is not
         // directBootAware, so it is unresolvable until first unlock — the
         // SyncService §2 isUserUnlocked gate stays the sole unlock gate, and
-        // SyncController.start here is the same entry as the pairing path.
+        // SyncController.start here is the same entry as the pairing path. The
+        // probe is the guarded one (5e-2, finding F-J): a store that cannot be
+        // read raises the storage-error banner instead of killing the process.
         val appContext = applicationContext
         Thread({
-            if (AppCore.hasPairedConversation()) SyncController.start(appContext, ConversationStore.events)
+            if (runBlocking { ConversationStore.probePaired() } == true) {
+                SyncController.start(appContext, ConversationStore.events)
+            }
         }, "titlan-launch-sync").start()
     }
 }

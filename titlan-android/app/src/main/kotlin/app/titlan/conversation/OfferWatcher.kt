@@ -4,6 +4,7 @@
 package app.titlan.conversation
 
 import app.titlan.core.AppCore
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -14,7 +15,8 @@ import kotlinx.coroutines.withContext
  * conversation key not in the pre-mint set is the paired conversation. The
  * signal means "proof-of-scan verified and the conversation created"
  * (tezca-core relay_client/mod.rs:326-339), one round trip before the handoff
- * deposit. Bounded by the offer's own validity window.
+ * deposit. Bounded by the offer's own validity window. A failed poll counts
+ * as "nothing yet" (5e-2, finding F-J): the deadline still bounds the wait.
  */
 object OfferWatcher {
     const val DEFAULT_POLL_MILLIS: Long = 2_000L
@@ -31,8 +33,14 @@ object OfferWatcher {
         while (true) {
             val now = System.currentTimeMillis()
             if (now >= deadlineEpochMillis) return null
-            val keys = withContext(Dispatchers.IO) {
-                AppCore.get().listConversations().map { ConversationKey.of(it) }
+            val keys = try {
+                withContext(Dispatchers.IO) {
+                    AppCore.get().listConversations().map { ConversationKey.of(it) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyList()
             }
             keys.firstOrNull { it !in before }?.let { return it }
             delay(minOf(pollMillis, deadlineEpochMillis - now).coerceAtLeast(1L))

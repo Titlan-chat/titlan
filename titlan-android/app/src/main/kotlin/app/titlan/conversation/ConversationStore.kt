@@ -7,6 +7,7 @@ import app.titlan.core.AppCore
 import app.titlan.sync.ConnectionState
 import app.titlan.sync.SyncEvents
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +30,10 @@ import kotlinx.coroutines.withContext
  *
  * Events carry ids only (frozen 4b-2 §1); bodies are re-read from the store.
  * A3: no protocol logic here — every read and write is a core call.
+ *
+ * Failure rule (5e-2 gate E-5, finding F-J): every core call goes through
+ * [guarded], so a core failure never escapes a store or UI coroutine — it
+ * raises [storageError] and the call returns what was last published.
  */
 object ConversationStore : SyncEvents {
 
@@ -71,24 +76,51 @@ object ConversationStore : SyncEvents {
     /** Messages of one conversation in store order; empty until first refreshed. */
     fun messages(key: ConversationKey): StateFlow<List<UiMessage>> = flowFor(key).asStateFlow()
 
-    /** Re-reads the conversation list from core (IO) and publishes it. */
-    suspend fun refreshConversations(): List<ConversationKey> = withContext(Dispatchers.IO) {
-        val keys = AppCore.get().listConversations().map { ConversationKey.of(it) }
-        _conversations.value = keys
-        keys
+    /**
+     * Runs [block]; a failure raises [storageError] and returns [fallback]
+     * (5e-2, finding F-J). The exception and its detail are neither shown nor
+     * logged (INV-1). Cancellation is rethrown, never swallowed.
+     */
+    private inline fun <T> guarded(fallback: () -> T, block: () -> T): T =
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            _storageError.value = true
+            fallback()
+        }
+
+    /** Re-reads the conversation list from core (IO) and publishes it; on failure, the last list. */
+    suspend fun refreshConversations(): List<ConversationKey> = guarded({ _conversations.value }) {
+        withContext(Dispatchers.IO) {
+            val keys = AppCore.get().listConversations().map { ConversationKey.of(it) }
+            _conversations.value = keys
+            keys
+        }
     }
 
-    /** Re-reads one conversation's messages from core (IO) and publishes them. */
-    suspend fun refreshMessages(key: ConversationKey): List<UiMessage> = withContext(Dispatchers.IO) {
-        val list = AppCore.get().messages(key.bytes).map { m ->
-            UiMessage(
-                id = m.id.toHexLower(),
-                incoming = m.incoming,
-                body = ChatBody.decode(m.payloadType, m.typeVersion, m.body),
-            )
+    /** Re-reads one conversation's messages from core (IO) and publishes them; on failure, the last list. */
+    suspend fun refreshMessages(key: ConversationKey): List<UiMessage> = guarded({ flowFor(key).value }) {
+        withContext(Dispatchers.IO) {
+            val list = AppCore.get().messages(key.bytes).map { m ->
+                UiMessage(
+                    id = m.id.toHexLower(),
+                    incoming = m.incoming,
+                    body = ChatBody.decode(m.payloadType, m.typeVersion, m.body),
+                )
+            }
+            flowFor(key).value = list
+            list
         }
-        flowFor(key).value = list
-        list
+    }
+
+    /**
+     * 5e-2 (gate E-5, finding F-J): [app.titlan.core.AppCore.hasPairedConversation]
+     * off the main thread; null when core failed (the storage-error state is raised).
+     */
+    suspend fun probePaired(): Boolean? = guarded<Boolean?>({ null }) {
+        withContext(Dispatchers.IO) { AppCore.hasPairedConversation() }
     }
 
     /** Refreshes the list and, when given, one conversation (Activity ON_START). */
@@ -100,14 +132,22 @@ object ConversationStore : SyncEvents {
     /**
      * CU-D6 send: [ChatBody.admit] first; on [SendCheck.Ok] hands the trimmed
      * text to core's sendChat on IO (persisted pending; delivery and retry are
-     * the sync engine's) and re-reads the messages.
+     * the sync engine's) and re-reads the messages. A core failure is
+     * [SendOutcome.Failed] (5e-2, finding F-J): nothing was queued.
      */
     suspend fun send(key: ConversationKey, text: String): SendOutcome {
         return when (val check = ChatBody.admit(text)) {
             is SendCheck.Ok -> {
-                withContext(Dispatchers.IO) { AppCore.get().sendChat(key.bytes, check.text) }
-                refreshMessages(key)
-                SendOutcome.Queued
+                val queued = guarded({ false }) {
+                    withContext(Dispatchers.IO) { AppCore.get().sendChat(key.bytes, check.text) }
+                    true
+                }
+                if (queued) {
+                    refreshMessages(key)
+                    SendOutcome.Queued
+                } else {
+                    SendOutcome.Failed
+                }
             }
             else -> SendOutcome.Rejected(check)
         }

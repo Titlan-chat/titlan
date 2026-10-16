@@ -1,16 +1,17 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 Oculux Technologies LLC -->
 
-# Titlan release checklist (5d-2 → 5d-3 / v0.1.0-rc.2)
+# Titlan release checklist (5e-2 / v0.1.0)
 
 Authority: [the release-candidate freeze](design/2026-09-release-candidate-freeze.md),
 RC-D6. Executed by hand by the maintainer, top to bottom. Every step names
 WHERE it runs — `CI`, `VM titlan-dev`, `Windows`, `droplet` or `GitHub` — and
 every gate states the value it must show; a gate that shows anything else
-stops the release. `<tag>` is `v0.1.0-rc.2`; `<rc>` is the merged RC commit on
-`main`. Key material never enters a repository, agent session, report, or
-evidence log (RC-D3). `scripts/check-invariants.sh` family 17 pins the gate
-literals below. On the VM, `apksigner` and `zipalign`
+stops the release. `<tag>` is `v0.1.0`; `<rc>` is the merged RC commit on
+`main`; `<prev>` is the release published before `<tag>` (for `v0.1.0`, the
+second release candidate). Key material never enters a repository, agent
+session, report, or evidence log (RC-D3). `scripts/check-invariants.sh`
+family 17 pins the gate literals below. On the VM, `apksigner` and `zipalign`
 are `$ANDROID_HOME/build-tools/36.0.0/apksigner` and `…/zipalign`; `gh run` and
 `gh release` commands run outside the repository take `-R Titlan-chat/titlan`.
 
@@ -57,8 +58,9 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
   field (`adb shell input text` is acceptable) and tap "Pair from link".
   expect: `Paired — conversation established` on the emulator within 60 s,
   and on the physical device within 10 s after that.
-  Record both serials, `ro.build.fingerprint`, and the times of each
-  direction.
+  Record both serials, `ro.build.fingerprint`, and the measured times of
+  each direction: a UTC stamp at the scan or the tap, and one when each
+  `Paired — conversation established` line appears.
 - WHERE: devices — Message exchange (5e-1), in the conversation Direction B
   created. Type the literal `titlan message A to B` on the physical device
   and tap Send; type the literal `titlan message B to A` on the emulator and
@@ -76,8 +78,8 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
   `adb -s <serial> shell cmd connectivity airplane-mode enable`); type the
   literal `titlan message offline` and tap Send — it appears in the sender's
   list; then airplane mode OFF (`… airplane-mode disable`).
-  expect: `titlan message offline` appears on the emulator within 60 s of
-  airplane mode going off.
+  expect: `titlan message offline` appears on the emulator after reconnect,
+  within 5 minutes of airplane mode going off (ruling R-F; finding F-O).
 - WHERE: Windows — logcat hygiene, both devices:
   `adb -s <serial> logcat -d | findstr /c:"titlan message"`
   expect: no output on either device (INV-1: no message text in logcat).
@@ -110,25 +112,30 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
 
 ## 2. Tag ceremony
 
+- WHERE: VM titlan-dev — defensive registration (RC-D11) BEFORE the tag:
+  `curl -sL -o /dev/null -w '%{http_code}\n' https://rdap.org/domain/titlan.app`
+  and the same for `https://rdap.org/domain/titlan.net`.
+  expect: `200` and `200` (both registered). Skippable iff the ledger cites a
+  ratified amendment deferring RC-D11.
 - WHERE: GitHub — tag ruleset on `v*` (RC-D10) confirmed BEFORE the push:
   creation, update and deletion restricted; bypass list = the maintainer only.
   expect: the ruleset is `Active`; its name is recorded in the ledger.
 - WHERE: VM titlan-dev — `git switch main && git pull --ff-only && git rev-parse HEAD`
   expect: `<rc>`.
 - WHERE: VM titlan-dev —
-  `git tag -a v0.1.0-rc.2 -m "Titlan v0.1.0-rc.2 (pre-release)"`
-  then `git rev-parse 'v0.1.0-rc.2^{commit}'`
+  `git tag -a v0.1.0 -m "Titlan v0.1.0"`
+  then `git rev-parse 'v0.1.0^{commit}'`
   expect: `<rc>`.
-- WHERE: VM titlan-dev — `git push origin v0.1.0-rc.2`
-  expect: a `[new tag]` line for `v0.1.0-rc.2 -> v0.1.0-rc.2`; no rejection
-  by the ruleset.
+- WHERE: VM titlan-dev — `git push origin v0.1.0`
+  expect: a `[new tag]` line for `v0.1.0 -> v0.1.0`; no rejection by the
+  ruleset.
 
 ## 3. release.yml
 
 - WHERE: CI — the `Release artifacts` run for the tag.
   expect: conclusion `success`; its first step logged
   `release.yml triggered by <the maintainer's login>`.
-- WHERE: VM titlan-dev — `gh run download <run id> -n titlan-release-v0.1.0-rc.2 -D rc2 && cd rc2`
+- WHERE: VM titlan-dev — `gh run download <run id> -n titlan-release-v0.1.0 -D rel && cd rel`
   expect: `tezca-relay`, `titlan-android-unsigned.apk`, `tezca-core.cdx.json`,
   `tezca-relay.cdx.json`, `titlan-android-app.cdx.json`, `repro-report.txt`,
   `SHA256SUMS`.
@@ -151,7 +158,7 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
 ## 5. Independent rebuild
 
 - WHERE: VM titlan-dev — in the repository, at the tag, from the canonical
-  build path (docs/build.md): `git switch --detach v0.1.0-rc.2 && scripts/repro-build.sh`
+  build path (docs/build.md): `git switch --detach v0.1.0 && scripts/repro-build.sh`
   expect: `result: PASS`.
 - WHERE: VM titlan-dev — compare the local `repro-report.txt` with the
   downloaded one.
@@ -195,15 +202,23 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
 
 - WHERE: VM titlan-dev — `gh attestation download titlan-<tag>-unsigned.apk --repo Titlan-chat/titlan`
   expect: exit status `0`; one `.jsonl` attestation bundle written.
-- WHERE: VM titlan-dev — `gh release create v0.1.0-rc.2 --prerelease --verify-tag`
+- WHERE: VM titlan-dev — `gh release create v0.1.0 --verify-tag --latest`
   with the assets `titlan-<tag>.apk`, `titlan-<tag>-unsigned.apk`, the three
   SBOMs (`tezca-core.cdx.json`, `tezca-relay.cdx.json`,
   `titlan-android-app.cdx.json`), `repro-report.txt`, `SHA256SUMS`, and the
-  attestation bundle. The release notes state: pre-release; not supported;
-  pairing only (no conversation UI); and the `sha256sum titlan-<tag>.apk` line.
+  attestation bundle. The release notes state: the first supported release;
+  what it does (pairing by QR code or link, one-to-one text conversations,
+  background sync by a foreground service, Android 14 or later, GrapheneOS
+  first); what it does not do (as the site lists); Known issues — after the
+  network returns, delivery can take up to about 5 minutes (finding F-O), and
+  a pairing that fails partway can leave an empty conversation in the list,
+  so pair again (findings F-K/F-I); the `sha256sum titlan-<tag>.apk` line;
+  and the link to `https://titlan.chat/verify`.
   expect: exit status `0`; the release URL is printed.
-- WHERE: GitHub — `gh release view v0.1.0-rc.2 --json isPrerelease,isDraft`
-  expect: `"isPrerelease":true` and `"isDraft":false`.
+- WHERE: GitHub — `gh release view v0.1.0 --json isPrerelease,isDraft`
+  expect: `"isPrerelease":false` and `"isDraft":false`.
+- WHERE: GitHub — `gh api repos/Titlan-chat/titlan/releases/latest --jq .tag_name`
+  expect: `v0.1.0`.
 
 ## 8. Production-relay acceptance
 
@@ -227,8 +242,20 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
 - WHERE: devices — Airplane-mode round trip (5e-1): airplane mode ON on one
   device, the literal `titlan message offline` sent from it, airplane mode
   OFF.
-  expect: `titlan message offline` appears on the other device within 60 s of
-  airplane mode going off.
+  expect: `titlan message offline` appears on the other device after
+  reconnect, within 5 minutes of airplane mode going off (ruling R-F; finding
+  F-O).
+- WHERE: devices — Upgrade from `<prev>` (5e-2): on the second device,
+  `adb -s <serial> uninstall <applicationId>`, then
+  `adb -s <serial> install titlan-<prev>.apk` (the D4-signed asset of `<prev>`,
+  from `gh release download <prev> -R Titlan-chat/titlan -p 'titlan-<prev>.apk'`
+  on the VM, hashed on both sides); pair it with the first device by link (the
+  first device shows the pairing offer, the second pastes it); then
+  `adb -s <serial> install -r titlan-<tag>.apk` over it.
+  expect: `Success` for both installs and the in-place install; the second
+  device opens on the conversation list showing the conversation paired under
+  `<prev>`; the literal `titlan message upgrade` sent from the first device in
+  that conversation appears on the second device within 30 s of Send.
 - WHERE: Windows — logcat hygiene, both devices:
   `adb -s <serial> logcat -d | findstr /c:"titlan message"`
   expect: no output on either device (INV-1: no message text in logcat).
@@ -236,14 +263,21 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
 ## 9. Post-publish
 
 - WHERE: Windows — site status re-check at `https://titlan.chat/`.
-  expect: the page carries "There are no supported releases yet." and
-  "Pre-release builds may appear on GitHub Releases marked pre-release; they
-  are not supported."
+  expect: the page carries "Only the latest release on GitHub Releases is
+  supported; pre-releases are not."
 - WHERE: GitHub — SECURITY.md wording re-check on `main`.
-  expect: "Supported versions" carries the same pre-release sentence.
+  expect: "Supported versions" carries the same support sentence.
+- WHERE: VM titlan-dev — the §D6 redirects (RC-D11), set by hand in Cloudflare
+  once the domains are registered:
+  `curl -sI https://titlan.app | grep -iE '^(HTTP|location)'` and
+  `curl -sI https://titlan.net | grep -iE '^(HTTP|location)'`.
+  expect: `302` with `location: https://github.com/Titlan-chat/titlan/releases/latest`
+  for `titlan.app`; `301` with a `location` on `https://titlan.chat` for
+  `titlan.net`. Skippable iff the ledger cites a ratified amendment deferring
+  RC-D11.
 - WHERE: droplet — redeploy the tagged relay binary (by hand, deploy/README.md).
   Skippable iff `sha256sum tezca-relay` of the downloaded binary equals
-  `86013b9956f302b1fbd33e5d364e94a2cc849dc08abf2097ee6e0494c4d461ac`.
+  `4e91ee9d7e7efd58c320238996a9bdcb82a7c440400852897dc0021a6646ae1e`.
   expect: `sha256sum` of the served binary equals the published one.
 - WHERE: Windows — ledger entry with every hash: `<rc>`, the tag object, the
   `release.yml` run id, each `SHA256SUMS` line, the signed APK's sha256, the
