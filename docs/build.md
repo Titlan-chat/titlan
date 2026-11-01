@@ -9,7 +9,7 @@
 |------|---------|-----------|
 | Rust | 1.97.0 | `rust-toolchain.toml` (rustup installs it automatically) |
 | protoc | any recent (CI: Ubuntu `protobuf-compiler`) | needed by libsignal's build script |
-| JDK | 17.0.20.1 (Temurin) | CI pins `java-version: "17.0.20+1"` (`setup-java`'s spelling of the same build); another patch level changes the APK (finding F-B) |
+| JDK | 17.0.20.1 (Temurin) | CI pins `java-version: "17.0.20+101"` (`setup-java`'s spelling of the same build); another patch level changes the APK (finding F-B) |
 | Android SDK | platform 36, build-tools 36 | `compileSdk` in `titlan-android/app/build.gradle.kts` |
 | Gradle | 8.14.5 | wrapper (`gradle-wrapper.properties`, with distribution SHA-256) |
 
