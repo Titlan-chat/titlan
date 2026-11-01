@@ -30,6 +30,12 @@ ignore = [
     # hax formal-verification macros inside libsignal's tree. Nothing to fix
     # on our side; revisit on every libsignal bump.
     { id = "RUSTSEC-2026-0173", reason = "transitive via libsignal → libcrux → hax-lib-macros; build-time proc-macro only" },
+    # basic-toml is unmaintained (repository archived 2025-03; no fix exists —
+    # askama_derive 0.16.1 still requires it). Reaches us only through
+    # uniffi_bindgen → askama → askama_macros → askama_derive, a build-time
+    # proc-macro chain that never enters a shipped artifact. Approved 2026-11-01
+    # (ledger item 44, A-4); revisit on every uniffi bump.
+    { id = "RUSTSEC-2026-0374", reason = "transitive via uniffi_bindgen → askama_derive; build-time proc-macro only" },
 ]
 
 [licenses]

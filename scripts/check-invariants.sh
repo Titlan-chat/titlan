@@ -1300,7 +1300,7 @@ fi
 # and docs/build.md states the pin (22c). Moving either pin is a deliberate,
 # gated unit — never a drive-by edit.
 ci_runner='ubuntu-24.04'
-ci_jdk='17.0.20+1'
+ci_jdk='17.0.20+101'
 ci_jdk_self='17.0.20.1'
 ci_wf=$(list_files | grep -E '^\.github/workflows/[^/]+\.ya?ml$' || true)
 ci_runs=0
