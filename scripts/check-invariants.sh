@@ -739,6 +739,26 @@ if [ -d site ]; then
   fi
 fi
 
+# 15i. Domain statement (docs-v010 gate DG-2, RC-D11 as amended 2026-11-01):
+#      the landing page carries the domain sentence exactly once, plain text,
+#      counted on whitespace-flattened text like 15h; the site names no other
+#      domain (third parties and reservations stay off the public surface).
+site_domains='Titlan is titlan.chat and titlan.app; no other domain is Titlan.'
+if [ -f site/index.html ]; then
+  site_flat_dom=$(tr '\n' ' ' < site/index.html | tr -s ' ')
+  site_domains_n=$(printf '%s\n' "$site_flat_dom" | grep -oF "$site_domains" | grep -c . || true)
+  if [ "$site_domains_n" -ne 1 ]; then
+    echo "site 15i: site/index.html must carry the domain sentence exactly once (found $site_domains_n): $site_domains"
+    fail=1
+  fi
+  for site_third in 'titlan.net' 'titlan.com'; do
+    if grep -qF "$site_third" site/index.html site/verify.html site/404.html 2>/dev/null; then
+      echo "site 15i: $site_third must not appear on the site (RC-D11 as amended: no other domain is Titlan)"
+      fail=1
+    fi
+  done
+fi
+
 # --- 16. Docs riders (RC-D9 ordering; RC-D5 container image) ------------------
 # The release-candidate docs bundle (docs/design/2026-09-release-candidate-freeze.md
 # RC-D9) lands as one unit before the RC branch is cut; this family pins its
@@ -842,6 +862,46 @@ else
   fail=1
 fi
 
+# 16g. RC freeze: the RC-D11 amendment of 2026-11-01 is appended under
+#      '## Amendments' (docs-v010 gate DG-4; DR-1 append-only form), and the
+#      text above that heading is byte-intact (hash of record at de23d5d).
+rc_freeze=docs/design/2026-09-release-candidate-freeze.md
+rc_freeze_body='00dd22f5bd21cbf2684515eecc592ddce28cd593dddfc3abd75b34eea4ab7127'
+if [ -f "$rc_freeze" ]; then
+  if ! grep -qF 'RC-D11 (2026-11-01' "$rc_freeze"; then
+    echo "docs rider 16g: $rc_freeze lacks the RC-D11 amendment of 2026-11-01 under '## Amendments'"
+    fail=1
+  fi
+  rc_freeze_body_now=$(sed -n '1,/^## Amendments$/p' "$rc_freeze" | sha256sum | cut -d' ' -f1)
+  if [ "$rc_freeze_body_now" != "$rc_freeze_body" ]; then
+    echo "docs rider 16g: $rc_freeze text above '## Amendments' changed (append-only; expected $rc_freeze_body, found $rc_freeze_body_now)"
+    fail=1
+  fi
+else
+  echo "docs rider 16g: MISSING $rc_freeze"
+  fail=1
+fi
+# 16h. User notes carry the two known-issue sections of the first supported
+#      release (docs-v010 gate DG-5; release notes v0.1.0, findings F-O and
+#      F-K/F-I).
+for un_head in '## Delivery after your network comes back' '## An empty conversation after a pairing that did not finish'; do
+  if ! grep -qxF "$un_head" docs/user-notes.md 2>/dev/null; then
+    echo "docs rider 16h: docs/user-notes.md lacks the section heading: $un_head"
+    fail=1
+  fi
+done
+# 16i. README status is the first-supported-release form, version-free
+#      (docs-v010 gate DG-3): carries 'first supported release'; the
+#      pre-release status form is gone.
+if ! grep -qF 'first supported release' README.md; then
+  echo "docs rider 16i: README.md lacks the status phrase 'first supported release'"
+  fail=1
+fi
+if grep -qF 'implemented on Android; the wire protocol is frozen' README.md; then
+  echo "docs rider 16i: README.md still carries the pre-release status form 'implemented on Android; the wire protocol is frozen'"
+  fail=1
+fi
+
 # --- 17. Release identity (5d-2, updated by 5e-2) ------------------------------
 # The release-candidate unit (docs/design/2026-09-release-candidate-freeze.md,
 # sequencing step 3), as updated for the first supported release (5e-2 gate
@@ -926,6 +986,35 @@ if ! grep -qF 'echo "release.yml triggered by ${{ github.actor }}"' .github/work
   echo 'release identity 17f: .github/workflows/release.yml lacks the actor echo: echo "release.yml triggered by ${{ github.actor }}" (RC-D10)'
   fail=1
 fi
+
+# 17g. SECURITY.md carries the domain sentence exactly once under a
+#      '## Domains' heading (docs-v010 gate DG-2); markdown form with code
+#      spans, counted on whitespace-flattened text like 17d.
+rc_domains='Titlan is `titlan.chat` and `titlan.app`; no other domain is Titlan.'
+rc_domains_n=$(printf '%s\n' "$rc_security_flat" | grep -oF "$rc_domains" | grep -c . || true)
+if [ "$rc_domains_n" -ne 1 ]; then
+  echo "release identity 17g: SECURITY.md must carry the domain sentence exactly once (found $rc_domains_n): $rc_domains"
+  fail=1
+fi
+if ! grep -qx '## Domains' SECURITY.md; then
+  echo "release identity 17g: SECURITY.md lacks the '## Domains' heading"
+  fail=1
+fi
+# 17h. Checklist procedure facts (docs-v010 gate DG-1): the literals the
+#      §0/§8/§9 amendments introduced are present, and the struck forms are
+#      gone (the titlan.net line; the rc.2 relay hash as the redeploy skip).
+for rc_doc_lit in 'KEYCODE_BACK' '200 characters' 'FLAG_SECURE' 'Conversation <hex>' 'from the VM' 'publishedAt'; do
+  if ! grep -qF -- "$rc_doc_lit" "$rc_checklist" 2>/dev/null; then
+    echo "release identity 17h: $rc_checklist lacks the procedure literal: $rc_doc_lit"
+    fail=1
+  fi
+done
+for rc_doc_gone in 'titlan.net' '4e91ee9d'; do
+  if [ "$(grep -cF -- "$rc_doc_gone" "$rc_checklist" 2>/dev/null || true)" -gt 0 ]; then
+    echo "release identity 17h: $rc_checklist still carries the struck form: $rc_doc_gone"
+    fail=1
+  fi
+done
 
 # --- 18. Release TLS trust = bundled Mozilla roots (5d-4, RC-D7 amendment) ---
 # Finding F-C′ (v0.1.0-rc.2 candidate, checklist §0): rustls-platform-verifier's
@@ -1353,4 +1442,4 @@ if [ "$fail" -ne 0 ]; then
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release identity (5e-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release identity (5e-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK), post-v0.1.0 docs truth (docs-v010))."
