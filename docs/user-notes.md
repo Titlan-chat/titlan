@@ -54,3 +54,25 @@ one the relay refused for good is marked "Not delivered".
 
 Source: `docs/design/2026-09-conversation-ui-freeze.md` CU-D6 (states, the
 no-ticks decision); `docs/threat-model.md` TM-R4 (restart loss and recovery).
+
+## Delivery after your network comes back
+
+When your device regains a network (airplane mode off, a change of network,
+a device that slept), the first connection Titlan makes can be unusable
+while the label still reads "Online". Titlan notices through its keepalive
+and reconnects on its own; a message sent in that window arrives after the
+reconnect, up to about five minutes later. Nothing is lost, duplicated or
+refused — the wait is the only effect.
+
+Source: release notes v0.1.0 (Known issues, finding F-O);
+`docs/design/2026-10-transport-keepalive-freeze.md` (the keepalive that
+detects the dead connection).
+
+## An empty conversation after a pairing that did not finish
+
+If a pairing stops partway (a link that was no longer valid, a device that
+lost its network during the exchange), the list can show a conversation
+that no one can message in. Pair again; the empty one can be ignored.
+Removing it automatically is planned.
+
+Source: release notes v0.1.0 (Known issues, findings F-K/F-I).

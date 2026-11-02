@@ -9,6 +9,13 @@ Only the latest release on GitHub Releases is supported; pre-releases are
 not. Security reports against the latest release and against `main` are
 welcome.
 
+## Domains
+
+Titlan is `titlan.chat` and `titlan.app`; no other domain is Titlan.
+`relay.titlan.chat` is the default relay; `titlan.app` redirects to the
+latest release on GitHub Releases. Reports concerning any other domain are
+out of scope.
+
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately — do not open a public

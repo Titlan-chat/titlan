@@ -10,9 +10,11 @@ logging identities. GrapheneOS first, standard Android second.
 Titlan is the first module of a broader security platform, published by
 Oculux Technologies LLC.
 
-**Status:** pairing by QR code or link and one-to-one text conversations are
-implemented on Android; the wire protocol is frozen (spec 1.0, below).
-Releases and their proofs are on
+**Status:** the first supported release is published; only the latest release
+on GitHub Releases is supported, pre-releases are not. Pairing by QR code or
+link and one-to-one text conversations on Android 14 or later (GrapheneOS
+first); the wire protocol is frozen (spec 1.0, below). Releases and their
+proofs are on
 [GitHub Releases](https://github.com/Titlan-chat/titlan/releases); the release
 procedure is [docs/release-checklist.md](docs/release-checklist.md).
 
