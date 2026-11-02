@@ -15,6 +15,18 @@ family 17 pins the gate literals below. On the VM, `apksigner` and `zipalign`
 are `$ANDROID_HOME/build-tools/36.0.0/apksigner` and `…/zipalign`; `gh run` and
 `gh release` commands run outside the repository take `-R Titlan-chat/titlan`.
 
+Device evidence (§0 and §8 as run for v0.1.0): `adb screencap` returns a black
+frame under the app's always-on FLAG_SECURE, so message alignment is read from
+`uiautomator dump` bounds (sender right, receiver left) or by eye and stated in
+words; Back is `adb shell input keyevent KEYCODE_BACK` (a tap on a text node
+can land on a zero-bounds node); conversation rows read `Conversation <hex>`.
+A literal is sent with the hardened send: focus the field, wait 1.5 s, type
+it, verify the field holds the literal, tap Send from a fresh dump, verify the
+field emptied — a field still holding the literal after the tap is a stop. A
+pairing link is typed in chunks of at most 200 characters (one
+`adb shell input text` call truncates at 1,256 characters) and the field is
+verified equal to the link before "Pair from link" is tapped.
+
 ## 0. Pre-tag device smoke
 
 The release trust path (RC-D7) is provable only on a device: the debug suites
@@ -54,30 +66,32 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
   the physical device; the emulator's paste field appears about 20 s after
   its pairing screen opens (the scan timeout). Read the physical device's
   `titlan://pair#` link fresh from its screen (a link read earlier names a
-  pairing inbox that may already be retired), paste it into the emulator's
-  field (`adb shell input text` is acceptable) and tap "Pair from link".
+  pairing inbox that may already be retired), type it into the emulator's
+  field in chunks of at most 200 characters, verify the field equals the
+  link, and tap "Pair from link".
   expect: `Paired — conversation established` on the emulator within 60 s,
   and on the physical device within 10 s after that.
   Record both serials, `ro.build.fingerprint`, and the measured times of
   each direction: a UTC stamp at the scan or the tap, and one when each
   `Paired — conversation established` line appears.
 - WHERE: devices — Message exchange (5e-1), in the conversation Direction B
-  created. Type the literal `titlan message A to B` on the physical device
-  and tap Send; type the literal `titlan message B to A` on the emulator and
-  tap Send.
+  created. Send the literal `titlan message A to B` from the physical device
+  and the literal `titlan message B to A` from the emulator (hardened send,
+  preamble).
   expect: each message appears on the other device within 30 s of Send —
   right-aligned on the sender, left-aligned on the receiver.
 - WHERE: devices — Idle-socket round trip (F-L). Leave both devices in that
   conversation, screens on, untouched for 15 minutes: no sends, no network
   toggles, no app switching (the keepalive runs about sixteen rounds). Then
-  type the literal `titlan message idle` on the physical device and tap Send.
+  send the literal `titlan message idle` from the physical device (hardened
+  send).
   expect: `titlan message idle` appears on the emulator within 60 s of Send.
   A message that arrives only after a network toggle is the F-L failure.
 - WHERE: devices — Airplane-mode round trip (5e-1). Airplane mode ON on the
   physical device (quick settings, or
-  `adb -s <serial> shell cmd connectivity airplane-mode enable`); type the
-  literal `titlan message offline` and tap Send — it appears in the sender's
-  list; then airplane mode OFF (`… airplane-mode disable`).
+  `adb -s <serial> shell cmd connectivity airplane-mode enable`); send the
+  literal `titlan message offline` (hardened send) — it appears in the
+  sender's list; then airplane mode OFF (`… airplane-mode disable`).
   expect: `titlan message offline` appears on the emulator after reconnect,
   within 5 minutes of airplane mode going off (ruling R-F; finding F-O).
 - WHERE: Windows — logcat hygiene, both devices:
@@ -91,10 +105,10 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
 - WHERE: GitHub — post-merge `main` is green.
   `gh run list --branch main --commit <rc> --json name,conclusion`
   expect: every `conclusion` is `success`.
-- WHERE: Windows — ledger current and mount-verified.
-  expect: the ledger's last entry is the RC merge, and the sha256 of the
-  ledger on the reviewer's project mount equals the sha256 of the current
-  ledger.
+- WHERE: Windows — ledger current and reviewer-verified.
+  expect: the ledger's last entry is the RC merge; the maintainer attaches the
+  ledger file and the reviewer verifies its sha256 equals the current
+  ledger's, then refreshes the Project copy from those bytes.
 - WHERE: CI — `cargo deny` and `cargo audit` clean: job `rust-supply-chain`
   of the `<rc>` run.
   expect: `success`.
@@ -112,11 +126,11 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
 
 ## 2. Tag ceremony
 
-- WHERE: VM titlan-dev — defensive registration (RC-D11) BEFORE the tag:
+- WHERE: VM titlan-dev — RC-D11 as amended 2026-11-01, BEFORE the tag:
   `curl -sL -o /dev/null -w '%{http_code}\n' https://rdap.org/domain/titlan.app`
-  and the same for `https://rdap.org/domain/titlan.net`.
-  expect: `200` and `200` (both registered). Skippable iff the ledger cites a
-  ratified amendment deferring RC-D11.
+  and its RDAP `nameservers` compared with `titlan.chat`'s.
+  expect: `200`, and the nameserver pair equal to `titlan.chat`'s (a 200
+  alone proves registration, not control).
 - WHERE: GitHub — tag ruleset on `v*` (RC-D10) confirmed BEFORE the push:
   creation, update and deletion restricted; bypass list = the maintainer only.
   expect: the ruleset is `Active`; its name is recorded in the ledger.
@@ -232,16 +246,16 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
   completion times.
 - WHERE: devices — Message exchange (5e-1), in the conversation just paired:
   the literal `titlan message A to B` sent from the first device, the literal
-  `titlan message B to A` sent from the second.
+  `titlan message B to A` sent from the second (hardened send, preamble).
   expect: each appears on the other device within 30 s of Send.
 - WHERE: devices — Idle-socket round trip (F-L): both devices left in that
   conversation, screens on, untouched for 15 minutes; then the literal
-  `titlan message idle` sent from the first device.
+  `titlan message idle` sent from the first device (hardened send).
   expect: `titlan message idle` appears on the second device within 60 s of
   Send, with no network toggle.
 - WHERE: devices — Airplane-mode round trip (5e-1): airplane mode ON on one
-  device, the literal `titlan message offline` sent from it, airplane mode
-  OFF.
+  device, the literal `titlan message offline` sent from it (hardened send),
+  airplane mode OFF.
   expect: `titlan message offline` appears on the other device after
   reconnect, within 5 minutes of airplane mode going off (ruling R-F; finding
   F-O).
@@ -250,12 +264,15 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
   `adb -s <serial> install titlan-<prev>.apk` (the D4-signed asset of `<prev>`,
   from `gh release download <prev> -R Titlan-chat/titlan -p 'titlan-<prev>.apk'`
   on the VM, hashed on both sides); pair it with the first device by link (the
-  first device shows the pairing offer, the second pastes it); then
-  `adb -s <serial> install -r titlan-<tag>.apk` over it.
+  first device shows the pairing offer, the second types it in chunks of at
+  most 200 characters, field verified equal); then
+  `adb -s <serial> install -r titlan-<tag>.apk` over it and relaunch the app.
   expect: `Success` for both installs and the in-place install; the second
-  device opens on the conversation list showing the conversation paired under
-  `<prev>`; the literal `titlan message upgrade` sent from the first device in
-  that conversation appears on the second device within 30 s of Send.
+  device opens on the conversation list showing the one row
+  `Conversation <hex>` paired under `<prev>`; open it and record which
+  messages were already present; the literal `titlan message upgrade` sent
+  from the first device in that conversation (hardened send) appears on the
+  second device within 30 s of Send.
 - WHERE: Windows — logcat hygiene, both devices:
   `adb -s <serial> logcat -d | findstr /c:"titlan message"`
   expect: no output on either device (INV-1: no message text in logcat).
@@ -267,20 +284,23 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
   supported; pre-releases are not."
 - WHERE: GitHub — SECURITY.md wording re-check on `main`.
   expect: "Supported versions" carries the same support sentence.
-- WHERE: VM titlan-dev — the §D6 redirects (RC-D11), set by hand in Cloudflare
-  once the domains are registered:
-  `curl -sI https://titlan.app | grep -iE '^(HTTP|location)'` and
-  `curl -sI https://titlan.net | grep -iE '^(HTTP|location)'`.
-  expect: `302` with `location: https://github.com/Titlan-chat/titlan/releases/latest`
-  for `titlan.app`; `301` with a `location` on `https://titlan.chat` for
-  `titlan.net`. Skippable iff the ledger cites a ratified amendment deferring
-  RC-D11.
+- WHERE: VM titlan-dev — the `titlan.app` redirect (RC-D11 as amended
+  2026-11-01; set in Cloudflare 2026-11-02 as `A @ 192.0.2.1` Proxied plus
+  Redirect Rule `titlan-app-latest-release`):
+  `curl -sI https://titlan.app | grep -iE '^(HTTP|location)'`.
+  expect: `302` with `location: https://github.com/Titlan-chat/titlan/releases/latest`.
+  No other domain is checked: Titlan is `titlan.chat` and `titlan.app`.
 - WHERE: droplet — redeploy the tagged relay binary (by hand, deploy/README.md).
-  Skippable iff `sha256sum tezca-relay` of the downloaded binary equals
-  `4e91ee9d7e7efd58c320238996a9bdcb82a7c440400852897dc0021a6646ae1e`.
-  expect: `sha256sum` of the served binary equals the published one.
+  Skippable iff `sha256sum tezca-relay` of the downloaded binary equals the
+  sha256 of the binary the droplet currently serves
+  (`sha256sum /usr/local/bin/tezca-relay` on the droplet).
+  expect: `sha256sum` of the served binary equals the published one, and
+  `curl -s https://relay.titlan.chat/healthz` answers `ok` from the VM — the
+  check runs from the VM only (a request from the droplet to its own public
+  port does not cross the 443→8443 redirect).
 - WHERE: Windows — ledger entry with every hash: `<rc>`, the tag object, the
   `release.yml` run id, each `SHA256SUMS` line, the signed APK's sha256, the
   D4 digest as printed, both `repro-report.txt` hash pairs, the relay binary
-  hash, and the ruleset name.
+  hash, the ruleset name, the §8 record file's sha256, and the publish stamp
+  (`gh release view <tag> --json publishedAt`).
   expect: every listed value is present in the entry.

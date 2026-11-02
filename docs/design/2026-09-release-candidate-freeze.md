@@ -206,3 +206,13 @@ Base of the findings: titlan `main` `0ea1f505b61f1e9715eb1b4a0bbc18839aa65694`.
   No frozen decision changes. Unit `5d-5 pairing-on-device`; §0 now requires
   pairing in both directions. Gate `p5-5d5-pairing-on-device-gate.md`
   (sha256 de0220b06953756260ca713c5f2dfd1ad41b93215651d2f1c31b92fc9501485e).
+- **RC-D11 (2026-11-01, maintainer "RC-D11 amendment 2026-11-01 ratified as
+  written"; executed 2026-11-02):** `titlan.app` is registered (Cloudflare,
+  the same nameserver pair as `titlan.chat`) and answers `302` to the latest
+  GitHub release; `titlan.net` is held by an unrelated third party since
+  2026-09-25 — coexistence, the frozen `.net → 301` redirect is struck;
+  `titlan.com` is parked by a third party and not pursued. The checklist's
+  §2 precondition becomes: `titlan.app` RDAP `200` AND its nameserver pair
+  equals `titlan.chat`'s. Public statement, on the site and in SECURITY.md:
+  Titlan is `titlan.chat` and `titlan.app`; no other domain is Titlan.
+  Ledger items 43 and 45.
