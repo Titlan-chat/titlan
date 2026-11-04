@@ -80,6 +80,21 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
   preamble).
   expect: each message appears on the other device within 30 s of Send —
   right-aligned on the sender, left-aligned on the receiver.
+- WHERE: devices — Message timestamps (1.1): in that conversation, each of
+  the two exchange messages carries one time under its bubble on both
+  devices — the send time on the sender, the arrival time on the receiver,
+  each in that device's local zone, as a time of day (a message from today).
+  expect: a time under `titlan message A to B` and under `titlan message
+  B to A` on both devices; no delivery tick anywhere.
+- WHERE: devices — Conversation label (1.1): on the physical device, tap the
+  title `Conversation <hex>` in the chat header, type the literal
+  `titlan label smoke`, tap Save, then Back.
+  expect: the chat header and the list row read `titlan label smoke`, with
+  `Conversation <hex>` beneath the row and the time of the last message on
+  it. Then `adb -s <serial> shell am force-stop <applicationId>` and open
+  Titlan again: the row still reads `titlan label smoke` (the label is read
+  back from the encrypted store). Long-press the row, tap Clear: the row
+  reads `Conversation <hex>` again.
 - WHERE: devices — Idle-socket round trip (F-L). Leave both devices in that
   conversation, screens on, untouched for 15 minutes: no sends, no network
   toggles, no app switching (the keepalive runs about sixteen rounds). Then
@@ -95,8 +110,9 @@ No tag until this section passes on the exact `<rc>`, in BOTH directions.
   expect: `titlan message offline` appears on the emulator after reconnect,
   within 5 minutes of airplane mode going off (ruling R-F; finding F-O).
 - WHERE: Windows — logcat hygiene, both devices:
-  `adb -s <serial> logcat -d | findstr /c:"titlan message"`
-  expect: no output on either device (INV-1: no message text in logcat).
+  `adb -s <serial> logcat -d | findstr /c:"titlan message" /c:"titlan label"`
+  expect: no output on either device (INV-1: no message text and no label
+  in logcat).
 - WHERE: Windows — uninstall the smoke build from both devices (§8 needs fresh
   installs of the D4-signed APK).
 
@@ -248,6 +264,17 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
   the literal `titlan message A to B` sent from the first device, the literal
   `titlan message B to A` sent from the second (hardened send, preamble).
   expect: each appears on the other device within 30 s of Send.
+- WHERE: devices — Message timestamps (1.1): both exchange messages carry one
+  time under the bubble on both devices (send time on the sender, arrival
+  time on the receiver, local zone, a time of day).
+  expect: a time under each of `titlan message A to B` and `titlan message
+  B to A` on both devices; no delivery tick.
+- WHERE: devices — Conversation label (1.1): on the first device, tap the
+  chat header title, type the literal `titlan label release`, Save, Back.
+  expect: the header and the list row read `titlan label release` with
+  `Conversation <hex>` beneath; after
+  `adb -s <serial> shell am force-stop <applicationId>` and a relaunch the
+  row still reads `titlan label release`.
 - WHERE: devices — Idle-socket round trip (F-L): both devices left in that
   conversation, screens on, untouched for 15 minutes; then the literal
   `titlan message idle` sent from the first device (hardened send).
@@ -270,12 +297,17 @@ REPRO_KEEP_DIR (see docs/build.md). Only repro-build.sh output is evidence; cach
   expect: `Success` for both installs and the in-place install; the second
   device opens on the conversation list showing the one row
   `Conversation <hex>` paired under `<prev>`; open it and record which
-  messages were already present; the literal `titlan message upgrade` sent
-  from the first device in that conversation (hardened send) appears on the
-  second device within 30 s of Send.
+  messages were already present — a message stored under a pre-1.1 `<prev>`
+  shows no time (rows from before 1.1 are never back-filled); the literal
+  `titlan message upgrade` sent from the first device in that conversation
+  (hardened send) appears on the second device within 30 s of Send, with a
+  time under it. Then on the second device tap the title, type the literal
+  `titlan label upgrade`, Save: the pre-upgrade conversation accepts a label
+  and the row reads it (the schema v3 → v4 migration, on device).
 - WHERE: Windows — logcat hygiene, both devices:
-  `adb -s <serial> logcat -d | findstr /c:"titlan message"`
-  expect: no output on either device (INV-1: no message text in logcat).
+  `adb -s <serial> logcat -d | findstr /c:"titlan message" /c:"titlan label"`
+  expect: no output on either device (INV-1: no message text and no label
+  in logcat).
 
 ## 9. Post-publish
 

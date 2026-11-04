@@ -48,12 +48,27 @@ mailboxes for that conversation were lost on both sides (for example after a
 relay restart during a long outage) and in-band recovery ran out; pairing
 again is the only way forward.
 
-Messages carry no delivery ticks and no times in this version. A message in
-your list has been handed to Titlan for delivery, not necessarily delivered;
-one the relay refused for good is marked "Not delivered".
+Messages carry no delivery ticks in this version. A message in your list has
+been handed to Titlan for delivery, not necessarily delivered; one the relay
+refused for good is marked "Not delivered". The time under a message is this
+device's own clock — when you sent it, or when it arrived here — not the
+other device's. A message stored by an earlier Titlan version shows no time.
 
 Source: `docs/design/2026-09-conversation-ui-freeze.md` CU-D6 (states, the
-no-ticks decision); `docs/threat-model.md` TM-R4 (restart loss and recovery).
+no-ticks decision; times amended by unit 1.1); `docs/threat-model.md` TM-R4
+(restart loss and recovery).
+
+## Naming a conversation
+
+Tap the title of a conversation (or long-press it in the list) to give it a
+name — up to 64 characters. The name is stored only on this device, inside
+the same encrypted store as your messages, and is never sent to the other
+device or to the relay. The conversation's short code stays visible under
+the name; it is the one thing about a conversation that does not change.
+Clearing the name brings the code back.
+
+Source: `docs/design/2026-09-conversation-ui-freeze.md` (Amendments, unit
+1.1); the Titlan 1.0 plan of record, unit 1.1.
 
 ## Delivery after your network comes back
 
