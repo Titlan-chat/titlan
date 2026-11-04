@@ -111,3 +111,24 @@ titlan-mvp-work-order.md.
   relax them.
 - Locked decisions (libsignal-only crypto, blind relay, no directory,
   configurable relay, typed envelope) are not open for revision.
+
+## Amendments
+
+- **Titlan 1.0 plan of record (2026-11-03, maintainer "1.0 plan gate r1 as
+  recommended"; ledger item 48):** the 2026-07-28 sequence P6 → P11 above is
+  extended with P12 (desktop client, a linked device under P7's model) and
+  P13 (voice and video calls, its own design gate, extending the blind-relay
+  invariant to a RAM-only media relay as a ratified deviation). The sentence
+  "Voice/video and VPN: off-track, partner-or-later." is SUPERSEDED: voice and
+  video are part of Titlan 1.0; the VPN is product Phase 2, drafted only
+  after Titlan 1.0 is complete. Titlan 1.0 is: v0.1.0, then conversation
+  labels and timestamps, the published Known-issue fixes, P6 payload types
+  (read receipts with an off switch, reactions, disappearing messages), P7
+  multi-device with safety-number verification, P8 push with per-message
+  notifications, P9 iOS, P10 groups, P11 attachments, P12 desktop, P13
+  calls, released as v0.2.0 … v1.0.0 through the release checklist, with an
+  independent security audit commissioned at the end. Still unscheduled and
+  not part of 1.0: backup and export, usernames or a directory, the
+  per-conversation relay setting. The STATUS note above stands: every unit
+  requires its own design gate before any code; the locked decisions and
+  invariants of `titlan-mvp-work-order.md` are not open for revision here.
