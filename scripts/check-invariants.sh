@@ -1466,9 +1466,74 @@ if ! printf '%s\n' "$ci_doc_row" | grep -qF "$ci_jdk_self" \
   fail=1
 fi
 
+# --- 23. Conversation labels + message timestamps (1.1, labels-timestamps) --
+# The first code unit of the Titlan 1.0 plan of record (gate L-D1..L-D10):
+# schema v4 adds the local-only label column (23a); the FFI exports the two
+# additive methods (23b); the two chat hygiene suites carry the label
+# sentinel, so a label is proven as absent at rest and from logcat as chat
+# text — INV-1 "contact names" (23c); the release checklist §0/§8 carry the
+# two device steps (23d); the pre-1.1 "no timestamp" sentence is gone from
+# UiMessage.kt (23e); the label dialog and list screen hold no label text in
+# saved instance state (23f, the 20d rule extended).
+lt_schema="tezca-core/src/storage/schema.rs"
+lt_ffi="tezca-core/src/ffi.rs"
+lt_ui="titlan-android/app/src/main/kotlin/app/titlan/conversation/UiMessage.kt"
+lt_test_dir="titlan-android/app/src/androidTest/kotlin/app/titlan/conversation"
+# 23a. schema.rs records version 4 with the label column.
+for lt_lit in 'ALTER TABLE conversations ADD COLUMN label TEXT;' \
+              'VALUES (4, unixepoch())'; do
+  if ! grep -qF -- "$lt_lit" "$lt_schema" 2>/dev/null; then
+    echo "labels-timestamps 23a: $lt_schema lacks the v4 migration literal: $lt_lit"
+    fail=1
+  fi
+done
+# 23b. ffi.rs exports the two additive methods (L-D3).
+for lt_fn in 'pub fn set_conversation_label(' 'pub fn list_conversation_summaries('; do
+  if ! grep -qF -- "$lt_fn" "$lt_ffi" 2>/dev/null; then
+    echo "labels-timestamps 23b: $lt_ffi lacks the FFI method: $lt_fn"
+    fail=1
+  fi
+done
+# 23c. Both chat hygiene suites carry the label sentinel (L-D6).
+for lt_t in ChatAtRestTest.kt ChatLogcatHygieneTest.kt; do
+  if ! grep -qF 'titlan label sentinel' "$lt_test_dir/$lt_t" 2>/dev/null; then
+    echo "labels-timestamps 23c: $lt_test_dir/$lt_t lacks the label sentinel 'titlan label sentinel'"
+    fail=1
+  fi
+done
+# 23d. The checklist §0 and §8 carry the two device steps (L-D9/L-D10).
+for lt_sec in '## 0. Pre-tag device smoke' '## 8. Production-relay acceptance'; do
+  lt_block=$(awk -v s="$lt_sec" 'index($0,s)==1{p=1;next} /^## /{p=0} p' docs/release-checklist.md 2>/dev/null)
+  for lt_lit in 'Conversation label (1.1)' 'Message timestamps (1.1)'; do
+    if ! printf '%s\n' "$lt_block" | grep -qF "$lt_lit"; then
+      echo "labels-timestamps 23d: docs/release-checklist.md section '$lt_sec' lacks the block: $lt_lit"
+      fail=1
+    fi
+  done
+done
+# 23e. The pre-1.1 CU-D6 sentence is gone from UiMessage.kt (the doc comment
+#      wraps, so the file is read with its comment prefixes and line breaks
+#      folded to single spaces before the sentence is looked for).
+lt_ui_text=$(sed -E 's/^[[:space:]]*\*[[:space:]]?//' "$lt_ui" 2>/dev/null | tr '\n' ' ' | tr -s ' ')
+if printf '%s' "$lt_ui_text" | grep -qF 'No timestamp and no delivery state cross the FFI'; then
+  echo "labels-timestamps 23e: $lt_ui still states 'No timestamp and no delivery state cross the FFI' (superseded by 1.1 L-D2)"
+  fail=1
+fi
+# 23f. No saved-state label text (INV-1): the dialog and the list screen.
+for lt_f in titlan-android/app/src/main/kotlin/app/titlan/conversation/LabelDialog.kt \
+            titlan-android/app/src/main/kotlin/app/titlan/conversation/ConversationListScreen.kt; do
+  if [ ! -f "$lt_f" ]; then
+    echo "labels-timestamps 23f: MISSING $lt_f"
+    fail=1
+  elif grep -q 'rememberSaveable' "$lt_f"; then
+    echo "labels-timestamps 23f: $lt_f must not use rememberSaveable (INV-1: no label text in saved instance state)"
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release identity (5e-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK), post-v0.1.0 docs truth (docs-v010), Titlan 1.0 roadmap amendment (plan-1.0))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release identity (5e-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK), post-v0.1.0 docs truth (docs-v010), Titlan 1.0 roadmap amendment (plan-1.0), conversation labels + message timestamps (1.1))."

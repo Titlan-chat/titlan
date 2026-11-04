@@ -48,6 +48,21 @@ interface CoreClient : AutoCloseable {
     /** All known conversation ids (16 bytes each). */
     fun listConversations(): List<ByteArray>
 
+    /**
+     * Conversations with their local-only label and times, ordered by last
+     * activity, newest first (1.1, L-D3/L-D4). [listConversations] is unchanged.
+     */
+    fun listConversationSummaries(): List<ConversationSummary>
+
+    /**
+     * Sets or clears a conversation's local-only label (1.1, L-D3): `null` and
+     * the empty string clear it. Core enforces the label rule (trimmed,
+     * non-blank, at most 64 characters, no control characters) and rejects a
+     * violation as an exception — never truncates. A label is a contact name
+     * and never leaves the encrypted store (INV-1).
+     */
+    fun setConversationLabel(conversationId: ByteArray, label: String?)
+
     /** Overrides the relay for one conversation (INV-5). */
     fun setConversationRelay(conversationId: ByteArray, relayUrl: String)
 
@@ -77,7 +92,10 @@ data class OfferValidity(val issuedAtEpochSeconds: Long, val ttlSeconds: Long)
 /**
  * App-side mirror of a stored message as core returns it (5e-1): id and
  * conversation id as raw bytes, direction, the envelope's payload type and
- * type version, and the payload bytes. Generated types stay inside this file.
+ * type version, the payload bytes and, since 1.1 (L-D2), the local clock at
+ * insert on the row's own side — [sentAt] for an outgoing row, [receivedAt]
+ * for an incoming one, both Unix seconds; `null` on the other side and on
+ * every row stored before 1.1. Generated types stay inside this file.
  */
 class StoredChatMessage(
     val id: ByteArray,
@@ -86,6 +104,20 @@ class StoredChatMessage(
     val payloadType: Int,
     val typeVersion: Int,
     val body: ByteArray,
+    val sentAt: Long?,
+    val receivedAt: Long?,
+)
+
+/**
+ * App-side mirror of a conversation as core lists it (1.1, L-D3): the id as
+ * raw bytes, the local-only [label] (`null` = unlabelled), and the creation
+ * and last-activity times in Unix seconds.
+ */
+class ConversationSummary(
+    val id: ByteArray,
+    val label: String?,
+    val createdAt: Long,
+    val lastActivityAt: Long,
 )
 
 object CoreClientFactory {
@@ -123,6 +155,20 @@ private class FfiCoreClient(private val ffi: FfiClient) : CoreClient {
     }
 
     override fun listConversations(): List<ByteArray> = ffi.listConversations()
+
+    override fun listConversationSummaries(): List<ConversationSummary> =
+        ffi.listConversationSummaries().map { c ->
+            ConversationSummary(
+                id = c.id,
+                label = c.label,
+                createdAt = c.createdAt,
+                lastActivityAt = c.lastActivityAt,
+            )
+        }
+
+    override fun setConversationLabel(conversationId: ByteArray, label: String?) =
+        ffi.setConversationLabel(conversationId, label)
+
     override fun setConversationRelay(conversationId: ByteArray, relayUrl: String) =
         ffi.setConversationRelay(conversationId, relayUrl)
 
@@ -138,6 +184,8 @@ private class FfiCoreClient(private val ffi: FfiClient) : CoreClient {
                 payloadType = m.payloadType.toInt(),
                 typeVersion = m.typeVersion.toInt(),
                 body = m.body,
+                sentAt = m.sentAt,
+                receivedAt = m.receivedAt,
             )
         }
 

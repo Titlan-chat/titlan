@@ -44,6 +44,11 @@ object ConversationStore : SyncEvents {
     /** Most-recent-first, as core lists them. */
     val conversations: StateFlow<List<ConversationKey>> = _conversations.asStateFlow()
 
+    private val _rows = MutableStateFlow<List<ConversationRow>>(emptyList())
+
+    /** The list rows (1.1): label and last activity per conversation, in [conversations] order. */
+    val rows: StateFlow<List<ConversationRow>> = _rows.asStateFlow()
+
     private val _connection = MutableStateFlow<Map<ConversationKey, ConnectionState>>(emptyMap())
 
     /** Last reported per-conversation connection state; absent until the first event. */
@@ -108,11 +113,21 @@ object ConversationStore : SyncEvents {
                     id = m.id.toHexLower(),
                     incoming = m.incoming,
                     body = ChatBody.decode(m.payloadType, m.typeVersion, m.body),
+                    epochSeconds = null,
                 )
             }
             flowFor(key).value = list
             list
         }
+    }
+
+    /**
+     * 1.1 (L-D3/L-D5): hands a validated label (or `null` to clear) to core on
+     * IO and re-reads the list. Returns false when core rejected or failed
+     * (the storage-error state is raised; the screen keeps the dialog open).
+     */
+    suspend fun setLabel(key: ConversationKey, label: String?): Boolean {
+        TODO("1.1 GREEN: label write")
     }
 
     /**

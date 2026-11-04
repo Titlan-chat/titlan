@@ -85,4 +85,21 @@
     <string name="chat_pair_again">Pair again</string>
     <string name="chat_storage_error">Storage error — this device could not read or write its message store.</string>
     <string name="nav_back">Back</string>
+
+    <!--
+      Conversation label (1.1, L-D5). The name is a contact name: it lives only
+      in this device's encrypted store and is never sent (INV-1) — the dialog
+      says so. label_counter is the live "used/cap" counter; label_too_long
+      and label_invalid are the two rule violations the dialog can show.
+    -->
+    <string name="label_dialog_title">Name this conversation</string>
+    <string name="label_dialog_hint">Name</string>
+    <string name="label_dialog_note">Stored only on this device, encrypted. Never sent to anyone.</string>
+    <string name="label_counter">%1$d/%2$d</string>
+    <string name="label_too_long">A name can have at most %1$d characters.</string>
+    <string name="label_invalid">A name cannot contain line breaks or control characters.</string>
+    <string name="label_save">Save</string>
+    <string name="label_clear">Clear</string>
+    <string name="label_cancel">Cancel</string>
+    <string name="label_rename_action">Rename conversation</string>
 </resources>

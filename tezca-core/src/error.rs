@@ -85,6 +85,13 @@ pub enum CoreError {
     /// Underlying storage failure.
     #[error("storage error: {0}")]
     Storage(String),
+    /// A conversation label failed the 1.1 label rule (unit `labels-timestamps`,
+    /// L-D3): blank after trimming, over 64 Unicode scalar values, or carrying
+    /// a control character. Never truncated or repaired silently; the FFI
+    /// surfaces it in the INTERNAL class (`TitlanError::Other`) — the caller
+    /// validates first, so reaching it is a caller fault, not the peer's.
+    #[error("invalid conversation label: {0}")]
+    InvalidLabel(&'static str),
     /// The relay could not be reached (transport/connection failure — distinct
     /// from a 404, which is a clean "mailbox gone" signal).
     #[error("network error: {0}")]

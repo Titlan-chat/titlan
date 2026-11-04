@@ -27,8 +27,12 @@ import org.junit.runner.RunWith
  * a canary received from a scratch peer, all buffers, with the 4b-1
  * positive-control canary so absence cannot be vacuous.
  *
- * RED expectation: fails with `kotlin.NotImplementedError` at the stub
- * [ConversationStore.refreshConversations]. GREEN runs the real path.
+ * 1.1 (L-D6): a conversation label is a contact name and joins the canaries —
+ * set through the store, it must be as absent from logcat as the chat text.
+ *
+ * RED expectation (5e-1): fails with `kotlin.NotImplementedError` at the stub
+ * [ConversationStore.refreshConversations]. RED expectation (1.1): fails with
+ * `kotlin.NotImplementedError` at the stub [ConversationStore.setLabel].
  */
 @RunWith(AndroidJUnit4::class)
 class ChatLogcatHygieneTest {
@@ -53,6 +57,7 @@ class ChatLogcatHygieneTest {
         if (!app.isInitialized()) app.initializeIdentity()
         val sent = "titlan chat hygiene sent 5e1 x7q2"
         val received = "titlan chat hygiene received 5e1 k4m8"
+        val label = "titlan label sentinel logcat n5r7"
         val peerDb = File(context.cacheDir, "chat-logcat-peer.db").also { it.delete() }
         CoreClientFactory.open(peerDb.path, freshKey(), BuildConfig.RELAY_URL).use { peer ->
             peer.initializeIdentity()
@@ -60,6 +65,8 @@ class ChatLogcatHygieneTest {
 
             // RED stops here: the store is unimplemented.
             val key = ConversationStore.refreshConversations().first()
+            // 1.1 RED stops here: the label write is unimplemented.
+            assertTrue("the label canary must be stored", ConversationStore.setLabel(key, label))
             app.startSync(ConversationStore.events)
             assertEquals("the sent canary must be queued", SendOutcome.Queued, ConversationStore.send(key, sent))
             peer.sendChat(peerConv, received)
@@ -77,12 +84,12 @@ class ChatLogcatHygieneTest {
                 "absence results below would be meaningless",
             log.contains(canary),
         )
-        for (text in listOf(sent, received)) {
+        for (text in listOf(sent, received, label)) {
             val bytes = text.toByteArray(Charsets.UTF_8)
             val hex = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
             for (encoding in listOf(text, hex, hex.uppercase(), Base64.encodeToString(bytes, Base64.NO_WRAP))) {
                 assertFalse(
-                    "chat text leaked to logcat (INV-1), encoding: ${encoding.take(12)}…",
+                    "chat text or label leaked to logcat (INV-1), encoding: ${encoding.take(12)}…",
                     log.contains(encoding),
                 )
             }

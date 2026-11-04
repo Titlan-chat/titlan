@@ -18,7 +18,7 @@ use tokio::runtime::Runtime;
 use crate::Result;
 use crate::config::TransportTiming;
 use crate::relay_client::Engine;
-use crate::storage::{DbKey, Store, StoredMessage};
+use crate::storage::{ConversationSummary, DbKey, Store, StoredMessage};
 
 /// One process-wide async runtime shared by every [`TitlanClient`].
 ///
@@ -291,6 +291,38 @@ impl TitlanClient {
     /// fails.
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>> {
         self.store.list_conversation_ids()
+    }
+
+    /// Lists conversations with label and times, ordered by last activity
+    /// (1.1, L-D3/L-D4). [`Self::list_conversations`] is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    pub fn list_conversation_summaries(&self) -> Result<Vec<ConversationSummary>> {
+        self.store.list_conversation_summaries()
+    }
+
+    /// Sets or clears a conversation's local-only label (1.1, L-D3). `None`
+    /// and the empty string clear it; the label rule is enforced in storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::InvalidLabel`] when the label breaks the rule, or
+    /// [`CoreError::Storage`] when the underlying `SQLCipher` query fails.
+    pub fn set_conversation_label(&self, id: &ConversationId, label: Option<&str>) -> Result<()> {
+        self.store.set_conversation_label(id, label)
+    }
+
+    /// Reads a conversation's label (`None` = unlabelled).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    pub fn conversation_label(&self, id: &ConversationId) -> Result<Option<String>> {
+        self.store.conversation_label(id)
     }
 
     /// Overrides the relay URL for a conversation (INV-5).

@@ -84,6 +84,45 @@ pub struct StoredMessage {
     pub type_version: u8,
     /// Payload bytes (inside the encrypted DB — INV-1).
     pub body: Vec<u8>,
+    /// Local clock at insert for an outgoing row, Unix seconds (1.1, L-D2);
+    /// `None` for incoming rows and for rows stored before 1.1 (never
+    /// back-filled).
+    pub sent_at: Option<i64>,
+    /// Local clock at insert for an incoming row, Unix seconds (1.1, L-D2);
+    /// `None` for outgoing rows and for rows stored before 1.1.
+    pub received_at: Option<i64>,
+}
+
+/// A conversation as the list renders it (1.1, L-D3/L-D4): the local-only
+/// label (schema v4; `None` = unlabelled, the UI shows the hex form) and the
+/// two times the list orders and annotates by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationSummary {
+    /// Conversation id.
+    pub id: [u8; 16],
+    /// Local-only label; never crosses the wire (INV-1: a contact name).
+    pub label: Option<String>,
+    /// Creation time, Unix seconds.
+    pub created_at: i64,
+    /// `max(created_at, max(sent_at, received_at))` over the conversation's
+    /// message rows — equals `created_at` while no timestamped row exists.
+    pub last_activity_at: i64,
+}
+
+/// Upper bound of a conversation label, in Unicode scalar values (1.1, L-D3).
+pub const MAX_LABEL_SCALARS: usize = 64;
+
+/// The 1.1 label rule (L-D3), applied before any write: `None` and the empty
+/// string clear the label (`Ok(None)`); otherwise the label is trimmed and
+/// must be non-blank, at most [`MAX_LABEL_SCALARS`] scalar values and free of
+/// control characters. Violations are rejected, never truncated or repaired.
+///
+/// # Errors
+///
+/// Returns [`CoreError::InvalidLabel`] naming the rule the label broke.
+pub fn normalize_label(label: Option<&str>) -> Result<Option<String>> {
+    let _ = label;
+    todo!("1.1 GREEN: the label rule")
 }
 
 /// A conversation's routing row.
@@ -247,23 +286,8 @@ impl Store {
         direction: Direction,
         frame: &InnerFrame,
     ) -> Result<[u8; 16]> {
-        let id = random_id();
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO messages (id, conversation_id, direction, payload_type,
-                                   type_version, body, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
-            rusqlite::params![
-                id.as_slice(),
-                conversation_id.as_slice(),
-                direction as u8,
-                frame.payload_type as u8,
-                frame.type_version,
-                frame.payload,
-            ],
-        )
-        .map_err(sql_err)?;
-        Ok(id)
+        self.insert_message(conversation_id, direction, frame, 0)
+            .map(|m| m.id)
     }
 
     /// Finds an existing conversation by peer address.
@@ -342,6 +366,54 @@ impl Store {
             .map_err(sql_err)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sql_err)
+    }
+
+    /// Lists conversations for the list screen (1.1, L-D4): ordered by
+    /// `last_activity_at DESC, created_at DESC, rowid DESC`, each with its
+    /// label and times. [`Self::list_conversation_ids`] is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
+    pub fn list_conversation_summaries(&self) -> Result<Vec<ConversationSummary>> {
+        todo!("1.1 GREEN: conversation summaries")
+    }
+
+    /// Sets or clears a conversation's local-only label (1.1, L-D3) after
+    /// [`normalize_label`]. Touches no routing column.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::InvalidLabel`] when the label breaks the rule, or
+    /// [`CoreError::Storage`] when the underlying `SQLCipher` query fails —
+    /// including when no row exists for the given id.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
+    pub fn set_conversation_label(&self, id: &[u8; 16], label: Option<&str>) -> Result<()> {
+        let _ = (id, label);
+        todo!("1.1 GREEN: set label")
+    }
+
+    /// Reads a conversation's label (`None` = unlabelled).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::Storage`] when the underlying `SQLCipher` query
+    /// fails — including when no row exists for the given id.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the store mutex is poisoned (a prior panic while holding it).
+    pub fn conversation_label(&self, id: &[u8; 16]) -> Result<Option<String>> {
+        let _ = id;
+        todo!("1.1 GREEN: read label")
     }
 
     /// Creates a conversation with explicit routing (mailboxes may be unknown
@@ -579,9 +651,12 @@ impl Store {
         frame: &InnerFrame,
     ) -> Result<[u8; 16]> {
         self.insert_message(conversation_id, Direction::Outgoing, frame, 0)
+            .map(|m| m.id)
     }
 
-    /// Saves an incoming (already decrypted) message as `received` (status 2).
+    /// Saves an incoming (already decrypted) message as `received` (status 2)
+    /// and returns the row as stored — the receiver callback hands exactly
+    /// this row to the UI (1.1: `received_at` is the local clock at insert).
     ///
     /// # Errors
     ///
@@ -591,7 +666,7 @@ impl Store {
         &self,
         conversation_id: &[u8; 16],
         frame: &InnerFrame,
-    ) -> Result<[u8; 16]> {
+    ) -> Result<StoredMessage> {
         self.insert_message(conversation_id, Direction::Incoming, frame, 2)
     }
 
@@ -601,7 +676,7 @@ impl Store {
         direction: Direction,
         frame: &InnerFrame,
         status: u8,
-    ) -> Result<[u8; 16]> {
+    ) -> Result<StoredMessage> {
         let id = random_id();
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -619,7 +694,16 @@ impl Store {
             ],
         )
         .map_err(sql_err)?;
-        Ok(id)
+        Ok(StoredMessage {
+            id,
+            conversation_id: *conversation_id,
+            direction,
+            payload_type: frame.payload_type as u8,
+            type_version: frame.type_version,
+            body: frame.payload.clone(),
+            sent_at: None,
+            received_at: None,
+        })
     }
 
     /// Marks a message as sent (status 1).
@@ -718,6 +802,8 @@ impl Store {
                     payload_type: row.get(3)?,
                     type_version: row.get(4)?,
                     body: row.get(5)?,
+                    sent_at: None,
+                    received_at: None,
                 })
             })
             .map_err(sql_err)?;
@@ -961,5 +1047,456 @@ mod v1_to_v3_migration_tests {
                 peer_gen: 0,
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod v4_tests {
+    use super::*;
+
+    /// The v2 and v3 migration DDL exactly as `schema::migrate` applies it,
+    /// restated here as fixture literals so the v3 pre-state is genuine and
+    /// independent of the production migration code under test.
+    const V2_ALTER: &str = "ALTER TABLE conversations ADD COLUMN relay_pin BLOB;";
+    const V3_ALTER: &str = "ALTER TABLE conversations ADD COLUMN recovery_role INTEGER;
+         ALTER TABLE conversations ADD COLUMN recovery_own_contrib BLOB;
+         ALTER TABLE conversations ADD COLUMN recovery_peer_contrib BLOB;
+         ALTER TABLE conversations ADD COLUMN recovery_root BLOB;
+         ALTER TABLE conversations ADD COLUMN recovery_own_gen INTEGER NOT NULL DEFAULT 0;
+         ALTER TABLE conversations ADD COLUMN recovery_peer_gen INTEGER NOT NULL DEFAULT 0;";
+
+    fn fresh_store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(&dir.path().join("t.db"), &DbKey::generate()).expect("open");
+        (dir, store)
+    }
+
+    fn routed(store: &Store, peer: &str) -> [u8; 16] {
+        store
+            .create_routed_conversation(peer, "wss://relay/v1", Some("sendbox"), "myinbox")
+            .expect("create conversation")
+    }
+
+    fn set_i64(store: &Store, sql: &str, id: &[u8; 16], value: i64) {
+        let conn = store.conn.lock().expect("store mutex poisoned");
+        let changed = conn
+            .execute(sql, rusqlite::params![id.as_slice(), value])
+            .expect("fixture update");
+        assert_eq!(changed, 1, "fixture update must hit exactly one row");
+    }
+
+    fn unix_seconds_now() -> i64 {
+        i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after the epoch")
+                .as_secs(),
+        )
+        .expect("fits i64")
+    }
+
+    /// L-D1 (the 18c precedent): a POPULATED, genuine v3-schema database
+    /// opened through the production `Store::open` path migrates to v4 with
+    /// every pre-existing row and recovery column intact and `label` NULL.
+    #[test]
+    fn migrate_v3_to_v4_preserves_rows_and_adds_null_label() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("v3.db");
+        let key = DbKey::generate();
+        let conv_id = [0x3Cu8; 16];
+        let msg_id = [0x4Du8; 16];
+        let own = [0x11u8; 32];
+        let peer = [0x22u8; 32];
+        let root = [0x33u8; 32];
+
+        {
+            let conn = rusqlite::Connection::open(&path).expect("open raw v3 db");
+            let mut key_hex = hex::encode(key.as_bytes());
+            let pragma = format!("PRAGMA key = \"x'{key_hex}'\";");
+            conn.execute_batch(&pragma).expect("key the connection");
+            key_hex.zeroize();
+            conn.execute_batch(
+                "CREATE TABLE schema_migrations (
+                   version INTEGER PRIMARY KEY,
+                   applied_at INTEGER NOT NULL
+                 );",
+            )
+            .expect("migration-mechanism table");
+            conn.execute_batch(schema::V1_DDL).expect("v1 ddl");
+            conn.execute_batch(V2_ALTER).expect("v2 alter");
+            conn.execute_batch(V3_ALTER).expect("v3 alter");
+            for v in 1..=3 {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, unixepoch())",
+                    [v],
+                )
+                .expect("record version");
+            }
+            conn.execute(
+                "INSERT INTO local_identity
+                   (id, address_name, registration_id, identity_keypair, created_at)
+                 VALUES (1, 'addr-v3', 42, x'0102', unixepoch())",
+                [],
+            )
+            .expect("local_identity row");
+            conn.execute(
+                "INSERT INTO conversations
+                   (id, peer_address, relay_url, mailbox_send, mailbox_recv, created_at,
+                    relay_pin, recovery_role, recovery_own_contrib, recovery_peer_contrib,
+                    recovery_root, recovery_own_gen, recovery_peer_gen)
+                 VALUES (?1, 'peer-a', 'wss://r.example/v1', 'sendbox', 'recvbox', 1700000000,
+                         NULL, 0, ?2, ?3, ?4, 2, 1)",
+                rusqlite::params![
+                    conv_id.as_slice(),
+                    own.as_slice(),
+                    peer.as_slice(),
+                    root.as_slice()
+                ],
+            )
+            .expect("conversations row");
+            conn.execute(
+                "INSERT INTO messages
+                   (id, conversation_id, direction, payload_type, type_version, body, status)
+                 VALUES (?1, ?2, 1, 1, 1, x'686921', 2)",
+                rusqlite::params![msg_id.as_slice(), conv_id.as_slice()],
+            )
+            .expect("messages row");
+            let v: u32 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("read version");
+            assert_eq!(v, 3, "pre-state must be schema v3");
+            let has_label: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'label'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("pragma_table_info");
+            assert_eq!(has_label, 0, "pre-state has no label column");
+        }
+
+        // Production open path: only the v4 migration runs here.
+        let store = Store::open(&path, &key).expect("open migrated store");
+        assert_eq!(store.schema_version().expect("version"), 4);
+        assert_eq!(
+            crate::identity::local_address(&store).expect("local address"),
+            "addr-v3"
+        );
+        let convo = store
+            .get_conversation(&conv_id)
+            .expect("read conversation")
+            .expect("conversation row survives");
+        assert_eq!(convo.peer_address, "peer-a");
+        assert_eq!(convo.relay_url, "wss://r.example/v1");
+        assert_eq!(convo.mailbox_send.as_deref(), Some("sendbox"));
+        assert_eq!(convo.mailbox_recv.as_deref(), Some("recvbox"));
+        assert_eq!(convo.relay_pin, None);
+        assert_eq!(
+            store.recovery_state(&conv_id).expect("read").expect("row"),
+            RecoveryRecord {
+                role: Some(0),
+                own_contrib: Some(own),
+                peer_contrib: Some(peer),
+                root: Some(root),
+                own_gen: 2,
+                peer_gen: 1,
+            },
+            "v3 recovery columns survive the v4 migration intact"
+        );
+        assert_eq!(
+            store.conversation_label(&conv_id).expect("read label"),
+            None,
+            "the new column reads NULL for a pre-existing row"
+        );
+        let messages = store.list_messages(&conv_id).expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, msg_id);
+        assert_eq!(messages[0].body, b"hi!".to_vec());
+        assert_eq!(
+            messages[0].sent_at, None,
+            "pre-1.1 rows are never back-filled"
+        );
+        assert_eq!(
+            messages[0].received_at, None,
+            "pre-1.1 rows are never back-filled"
+        );
+        let summaries = store.list_conversation_summaries().expect("summaries");
+        assert_eq!(
+            summaries,
+            vec![ConversationSummary {
+                id: conv_id,
+                label: None,
+                created_at: 1_700_000_000,
+                last_activity_at: 1_700_000_000,
+            }],
+            "an untimestamped history leaves last_activity_at = created_at"
+        );
+    }
+
+    /// L-D3: set → read → clear, through both clearing forms, trimmed.
+    #[test]
+    fn label_set_get_clear_roundtrip() {
+        let (_dir, store) = fresh_store();
+        let conv = routed(&store, "peer-a");
+        assert_eq!(store.conversation_label(&conv).expect("read"), None);
+
+        store
+            .set_conversation_label(&conv, Some("  Alice at work  "))
+            .expect("set label");
+        assert_eq!(
+            store.conversation_label(&conv).expect("read").as_deref(),
+            Some("Alice at work"),
+            "the stored label is the trimmed text"
+        );
+        let summaries = store.list_conversation_summaries().expect("summaries");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, conv);
+        assert_eq!(summaries[0].label.as_deref(), Some("Alice at work"));
+
+        store
+            .set_conversation_label(&conv, None)
+            .expect("clear with None");
+        assert_eq!(store.conversation_label(&conv).expect("read"), None);
+
+        store
+            .set_conversation_label(&conv, Some("Bob"))
+            .expect("set again");
+        store
+            .set_conversation_label(&conv, Some(""))
+            .expect("clear with the empty string");
+        assert_eq!(
+            store.conversation_label(&conv).expect("read"),
+            None,
+            "the empty string clears (L-D3: NULL/empty clears)"
+        );
+
+        let unknown = [0x99u8; 16];
+        assert!(
+            store.set_conversation_label(&unknown, Some("x")).is_err(),
+            "labelling an unknown conversation is an error, not a silent no-op"
+        );
+    }
+
+    /// L-D3: the rule rejects, never truncates — and a rejected write leaves
+    /// the stored label untouched.
+    #[test]
+    fn label_rules_reject_blank_long_and_control() {
+        assert_eq!(normalize_label(None).expect("None clears"), None);
+        assert_eq!(normalize_label(Some("")).expect("empty clears"), None);
+        assert_eq!(
+            normalize_label(Some(" Team Ops "))
+                .expect("trimmed")
+                .as_deref(),
+            Some("Team Ops")
+        );
+        let sixty_four = "é".repeat(MAX_LABEL_SCALARS);
+        assert_eq!(
+            normalize_label(Some(&sixty_four))
+                .expect("64 scalar values are allowed (bytes do not count)")
+                .as_deref(),
+            Some(sixty_four.as_str())
+        );
+        for (label, why) in [
+            ("   ", "blank after trimming"),
+            ("\t\n", "whitespace-only"),
+            (&"a".repeat(MAX_LABEL_SCALARS + 1), "65 scalar values"),
+            ("ctrl\u{7}char", "a control character"),
+            ("tab\tinside", "a tab (control)"),
+            ("line\nbreak", "a line break (control)"),
+            ("nul\0", "NUL"),
+        ] {
+            assert!(
+                matches!(
+                    normalize_label(Some(label)),
+                    Err(CoreError::InvalidLabel(_))
+                ),
+                "{why} must be rejected as InvalidLabel"
+            );
+        }
+
+        let (_dir, store) = fresh_store();
+        let conv = routed(&store, "peer-a");
+        store
+            .set_conversation_label(&conv, Some("kept"))
+            .expect("set label");
+        assert!(matches!(
+            store.set_conversation_label(&conv, Some("   ")),
+            Err(CoreError::InvalidLabel(_))
+        ));
+        assert!(matches!(
+            store.set_conversation_label(&conv, Some(&"x".repeat(MAX_LABEL_SCALARS + 1))),
+            Err(CoreError::InvalidLabel(_))
+        ));
+        assert_eq!(
+            store.conversation_label(&conv).expect("read").as_deref(),
+            Some("kept"),
+            "a rejected label leaves the stored one untouched"
+        );
+    }
+
+    /// L-D2: the local clock is written at insert on the row's own side only.
+    #[test]
+    fn timestamps_written_at_insert() {
+        let (_dir, store) = fresh_store();
+        let conv = routed(&store, "peer-a");
+        let before = unix_seconds_now();
+        let out_id = store
+            .save_outgoing(&conv, &InnerFrame::chat_v1("out"))
+            .expect("save outgoing");
+        let incoming = store
+            .save_incoming(&conv, &InnerFrame::chat_v1("in"))
+            .expect("save incoming");
+        let after = unix_seconds_now();
+
+        let messages = store.list_messages(&conv).expect("messages");
+        assert_eq!(messages.len(), 2);
+        let out = &messages[0];
+        assert_eq!(out.id, out_id);
+        assert_eq!(out.direction, Direction::Outgoing);
+        let sent = out.sent_at.expect("outgoing rows carry sent_at");
+        assert!(
+            (before..=after).contains(&sent),
+            "sent_at is the local clock at insert"
+        );
+        assert_eq!(out.received_at, None, "outgoing rows carry no received_at");
+
+        let inc = &messages[1];
+        assert_eq!(inc.id, incoming.id);
+        assert_eq!(inc.direction, Direction::Incoming);
+        let received = inc.received_at.expect("incoming rows carry received_at");
+        assert!((before..=after).contains(&received));
+        assert_eq!(inc.sent_at, None, "incoming rows carry no sent_at");
+        assert_eq!(
+            incoming, *inc,
+            "save_incoming returns the row exactly as list_messages reads it back"
+        );
+    }
+
+    /// L-D4: `last_activity_at = max(created_at, max(sent_at, received_at))`
+    /// and the list orders by it; `list_conversation_ids` keeps its order.
+    #[test]
+    fn summaries_order_by_last_activity() {
+        let (_dir, store) = fresh_store();
+        let a = routed(&store, "peer-a");
+        let b = routed(&store, "peer-b");
+        let c = routed(&store, "peer-c");
+        let backdate = "UPDATE conversations SET created_at = ?2 WHERE id = ?1";
+        set_i64(&store, backdate, &a, 1_000);
+        set_i64(&store, backdate, &b, 2_000);
+        set_i64(&store, backdate, &c, 5_000);
+
+        // A gets a message newer than B's creation; C's only message is older
+        // than C itself (created_at wins).
+        let a_msg = store
+            .save_incoming(&a, &InnerFrame::chat_v1("hello"))
+            .expect("save")
+            .id;
+        set_i64(
+            &store,
+            "UPDATE messages SET received_at = ?2 WHERE id = ?1",
+            &a_msg,
+            3_000,
+        );
+        let c_msg = store
+            .save_outgoing(&c, &InnerFrame::chat_v1("old"))
+            .expect("save");
+        set_i64(
+            &store,
+            "UPDATE messages SET sent_at = ?2 WHERE id = ?1",
+            &c_msg,
+            100,
+        );
+
+        let summaries = store.list_conversation_summaries().expect("summaries");
+        let order: Vec<[u8; 16]> = summaries.iter().map(|s| s.id).collect();
+        assert_eq!(
+            order,
+            vec![c, a, b],
+            "ordered by last activity, newest first"
+        );
+        let by_id = |id: &[u8; 16]| {
+            summaries
+                .iter()
+                .find(|s| s.id == *id)
+                .expect("present")
+                .clone()
+        };
+        assert_eq!(by_id(&a).last_activity_at, 3_000, "A: the message is newer");
+        assert_eq!(
+            by_id(&b).last_activity_at,
+            2_000,
+            "B: no messages → created_at"
+        );
+        assert_eq!(
+            by_id(&c).last_activity_at,
+            5_000,
+            "C: created_at beats an older message"
+        );
+        assert_eq!(by_id(&a).created_at, 1_000);
+
+        assert_eq!(
+            store.list_conversation_ids().expect("ids"),
+            vec![c, b, a],
+            "list_conversation_ids keeps the created_at order"
+        );
+    }
+
+    /// L-D6: a label is a contact name. Setting one touches no routing or
+    /// recovery column, and the label is absent from every frame the
+    /// conversation would send afterwards — the pending frame and its
+    /// padded encoding carry the chat text only.
+    #[test]
+    fn label_never_in_frame() {
+        let (_dir, store) = fresh_store();
+        let conv = routed(&store, "peer-a");
+        store
+            .set_recovery_pairing(&conv, 0, &[0x11u8; 32])
+            .expect("recovery pairing");
+        let routing_before = store.get_conversation(&conv).expect("read").expect("row");
+        let recovery_before = store.recovery_state(&conv).expect("read").expect("row");
+
+        let label = "titlan label sentinel core";
+        store
+            .set_conversation_label(&conv, Some(label))
+            .expect("set label");
+        assert_eq!(
+            store.get_conversation(&conv).expect("read").expect("row"),
+            routing_before,
+            "the routing row is untouched by a label write"
+        );
+        assert_eq!(
+            store.recovery_state(&conv).expect("read").expect("row"),
+            recovery_before,
+            "the recovery columns are untouched by a label write"
+        );
+
+        store
+            .save_outgoing(&conv, &InnerFrame::chat_v1("hello after labelling"))
+            .expect("queue a chat");
+        let pending = store.pending_chat(&conv).expect("pending");
+        assert_eq!(pending.len(), 1);
+        let (_, frame) = &pending[0];
+        assert_eq!(frame.payload, b"hello after labelling".to_vec());
+        let encoded = frame
+            .encode(&crate::config::PaddingProfile::default_profile())
+            .expect("encode");
+        for haystack in [frame.payload.as_slice(), encoded.as_slice()] {
+            assert!(
+                !contains(haystack, label.as_bytes()),
+                "the label must not appear in the frame (INV-1: never on the wire)"
+            );
+        }
+        assert!(
+            contains(encoded.as_slice(), b"hello after labelling"),
+            "positive control: the chat text is in the unencrypted inner frame"
+        );
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
     }
 }

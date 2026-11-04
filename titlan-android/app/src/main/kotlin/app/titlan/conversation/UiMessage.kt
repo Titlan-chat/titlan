@@ -9,7 +9,23 @@ package app.titlan.conversation
  * `chat/1` frame, or one of the two placeholders. No timestamp and no
  * delivery state cross the FFI in this version (freeze CU-D0/CU-D6).
  */
-data class UiMessage(val id: String, val incoming: Boolean, val body: DecodedBody)
+data class UiMessage(
+    val id: String,
+    val incoming: Boolean,
+    val body: DecodedBody,
+    val epochSeconds: Long?,
+)
+
+/**
+ * One conversation as the list renders it (1.1, L-D4): the local-only
+ * [label] (`null` = unlabelled — the row shows the hex form) and the
+ * last-activity time core computed, Unix seconds.
+ */
+data class ConversationRow(
+    val key: ConversationKey,
+    val label: String?,
+    val lastActivityEpochSeconds: Long,
+)
 
 /** The chat screen's view of a stored message body (CU-D6 decoding rule). */
 sealed interface DecodedBody {
