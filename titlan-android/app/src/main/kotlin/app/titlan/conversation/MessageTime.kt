@@ -5,6 +5,8 @@ package app.titlan.conversation
 
 import java.time.Instant
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 
 /**
@@ -20,6 +22,18 @@ object MessageTime {
      * Formats the Unix-seconds instant [epochSeconds] for a reader whose
      * clock reads [now] in zone [zone], in [locale].
      */
-    fun format(epochSeconds: Long, now: Instant, zone: ZoneId, locale: Locale): String =
-        TODO("1.1 GREEN: time format")
+    fun format(epochSeconds: Long, now: Instant, zone: ZoneId, locale: Locale): String {
+        val at = Instant.ofEpochSecond(epochSeconds).atZone(zone)
+        val today = at.toLocalDate() == now.atZone(zone).toLocalDate()
+        val formatter = if (today) {
+            DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+        } else {
+            DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT, FormatStyle.SHORT)
+        }
+        return formatter.withLocale(locale).format(at)
+    }
+
+    /** [format] for the device's clock, zone and locale — the one call the screens make. */
+    fun formatNow(epochSeconds: Long): String =
+        format(epochSeconds, Instant.now(), ZoneId.systemDefault(), Locale.getDefault())
 }

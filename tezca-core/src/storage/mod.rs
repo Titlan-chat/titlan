@@ -121,8 +121,25 @@ pub const MAX_LABEL_SCALARS: usize = 64;
 ///
 /// Returns [`CoreError::InvalidLabel`] naming the rule the label broke.
 pub fn normalize_label(label: Option<&str>) -> Result<Option<String>> {
-    let _ = label;
-    todo!("1.1 GREEN: the label rule")
+    let Some(raw) = label else {
+        return Ok(None);
+    };
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(CoreError::InvalidLabel("blank after trimming"));
+    }
+    if trimmed.chars().count() > MAX_LABEL_SCALARS {
+        return Err(CoreError::InvalidLabel(
+            "more than MAX_LABEL_SCALARS scalar values",
+        ));
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err(CoreError::InvalidLabel("control character"));
+    }
+    Ok(Some(trimmed.to_owned()))
 }
 
 /// A conversation's routing row.
@@ -381,7 +398,31 @@ impl Store {
     ///
     /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn list_conversation_summaries(&self) -> Result<Vec<ConversationSummary>> {
-        todo!("1.1 GREEN: conversation summaries")
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT c.id, c.label, c.created_at,
+                        MAX(c.created_at,
+                            COALESCE((SELECT MAX(m.sent_at) FROM messages m
+                                       WHERE m.conversation_id = c.id), 0),
+                            COALESCE((SELECT MAX(m.received_at) FROM messages m
+                                       WHERE m.conversation_id = c.id), 0)) AS last_activity_at
+                 FROM conversations c
+                 ORDER BY last_activity_at DESC, c.created_at DESC, c.rowid DESC",
+            )
+            .map_err(sql_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ConversationSummary {
+                    id: blob16(row.get::<_, Vec<u8>>(0)?),
+                    label: row.get(1)?,
+                    created_at: row.get(2)?,
+                    last_activity_at: row.get(3)?,
+                })
+            })
+            .map_err(sql_err)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sql_err)
     }
 
     /// Sets or clears a conversation's local-only label (1.1, L-D3) after
@@ -397,8 +438,18 @@ impl Store {
     ///
     /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn set_conversation_label(&self, id: &[u8; 16], label: Option<&str>) -> Result<()> {
-        let _ = (id, label);
-        todo!("1.1 GREEN: set label")
+        let label = normalize_label(label)?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn
+            .execute(
+                "UPDATE conversations SET label = ?2 WHERE id = ?1",
+                rusqlite::params![id.as_slice(), label],
+            )
+            .map_err(sql_err)?;
+        if changed == 0 {
+            return Err(CoreError::Storage("conversation not found".into()));
+        }
+        Ok(())
     }
 
     /// Reads a conversation's label (`None` = unlabelled).
@@ -412,8 +463,13 @@ impl Store {
     ///
     /// Panics if the store mutex is poisoned (a prior panic while holding it).
     pub fn conversation_label(&self, id: &[u8; 16]) -> Result<Option<String>> {
-        let _ = id;
-        todo!("1.1 GREEN: read label")
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT label FROM conversations WHERE id = ?1",
+            [id.as_slice()],
+            |row| row.get(0),
+        )
+        .map_err(sql_err)
     }
 
     /// Creates a conversation with explicit routing (mailboxes may be unknown
@@ -678,11 +734,17 @@ impl Store {
         status: u8,
     ) -> Result<StoredMessage> {
         let id = random_id();
+        // L-D2: the local clock, on the row's own side only.
+        let now = unix_seconds_now();
+        let (sent_at, received_at) = match direction {
+            Direction::Outgoing => (Some(now), None),
+            Direction::Incoming => (None, Some(now)),
+        };
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO messages (id, conversation_id, direction, payload_type,
-                                   type_version, body, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                   type_version, body, status, sent_at, received_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 id.as_slice(),
                 conversation_id.as_slice(),
@@ -691,6 +753,8 @@ impl Store {
                 frame.type_version,
                 frame.payload,
                 status,
+                sent_at,
+                received_at,
             ],
         )
         .map_err(sql_err)?;
@@ -701,8 +765,8 @@ impl Store {
             payload_type: frame.payload_type as u8,
             type_version: frame.type_version,
             body: frame.payload.clone(),
-            sent_at: None,
-            received_at: None,
+            sent_at,
+            received_at,
         })
     }
 
@@ -785,7 +849,8 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn
             .prepare(
-                "SELECT id, conversation_id, direction, payload_type, type_version, body
+                "SELECT id, conversation_id, direction, payload_type, type_version, body,
+                        sent_at, received_at
                  FROM messages WHERE conversation_id = ?1 ORDER BY rowid",
             )
             .map_err(sql_err)?;
@@ -802,8 +867,8 @@ impl Store {
                     payload_type: row.get(3)?,
                     type_version: row.get(4)?,
                     body: row.get(5)?,
-                    sent_at: None,
-                    received_at: None,
+                    sent_at: row.get(6)?,
+                    received_at: row.get(7)?,
                 })
             })
             .map_err(sql_err)?;
@@ -819,6 +884,15 @@ pub(crate) fn random_id() -> [u8; 16] {
         .try_fill_bytes(&mut id)
         .expect("OS CSPRNG unavailable");
     id
+}
+
+/// Local wall clock in Unix seconds (1.1, L-D2): what `insert_message` writes
+/// into `sent_at` / `received_at`. Saturates rather than panics on a clock
+/// before the epoch or beyond `i64`.
+fn unix_seconds_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 fn blob16(v: Vec<u8>) -> [u8; 16] {
@@ -845,8 +919,8 @@ mod v3_tests {
         let store = Store::open(&dir.path().join("t.db"), &DbKey::generate()).expect("open");
         assert_eq!(
             store.schema_version().expect("version"),
-            3,
-            "schema migrates to v3"
+            4,
+            "schema migrates to v4 (v3 recovery state, v4 label)"
         );
 
         let conv = store
@@ -982,9 +1056,9 @@ mod v1_to_v3_migration_tests {
             assert_eq!(v, 1, "pre-state must be schema v1");
         }
 
-        // Production open path: v2 and v3 migrations run here.
+        // Production open path: the v2, v3 and v4 migrations run here.
         let store = Store::open(&path, &key).expect("open migrated store");
-        assert_eq!(store.schema_version().expect("version"), 3);
+        assert_eq!(store.schema_version().expect("version"), 4);
 
         // Every pre-existing row survives intact.
         assert_eq!(
@@ -1000,6 +1074,11 @@ mod v1_to_v3_migration_tests {
         assert_eq!(convo.mailbox_send.as_deref(), Some("sendbox"));
         assert_eq!(convo.mailbox_recv.as_deref(), Some("recvbox"));
         assert_eq!(convo.relay_pin, None, "v2 column defaults to NULL");
+        assert_eq!(
+            store.conversation_label(&conv_id).expect("label"),
+            None,
+            "v4 column defaults to NULL"
+        );
         let messages = store.list_messages(&conv_id).expect("messages");
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].id, msg_id);

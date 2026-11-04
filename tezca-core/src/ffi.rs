@@ -603,6 +603,19 @@ mod classification_tests {
     /// Negative pin (order: "unsupported-version never surfaces as crypto"):
     /// the structural family maps to `Malformed` and to NO crypto-class
     /// variant.
+    /// 1.1 (L-D3): an invalid label is the caller's fault, not the peer's —
+    /// it surfaces in the INTERNAL class (`Other`), never MALFORMED (which the
+    /// pairing mapper classes as a bad offer) and never a crypto class.
+    #[test]
+    fn invalid_label_is_the_internal_class() {
+        match TitlanError::from(CoreError::InvalidLabel("blank after trimming")) {
+            TitlanError::Other { msg } => {
+                assert_eq!(msg, "invalid conversation label: blank after trimming");
+            }
+            other => panic!("InvalidLabel must map to TitlanError::Other, got {other:?}"),
+        }
+    }
+
     #[test]
     fn structural_family_never_surfaces_as_crypto() {
         for e in [

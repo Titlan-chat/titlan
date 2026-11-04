@@ -17,7 +17,7 @@ object LabelRules {
     const val MAX_SCALARS: Int = 64
 
     /** Unicode scalar values in [text] (what the live counter and the cap count). */
-    fun scalarCount(text: String): Int = TODO("1.1 GREEN: label rules")
+    fun scalarCount(text: String): Int = text.codePointCount(0, text.length)
 
     /**
      * Classifies a dialog draft: [LabelCheck.Clear] for a blank draft (the
@@ -25,7 +25,14 @@ object LabelRules {
      * label, [LabelCheck.TooLong] over the cap, [LabelCheck.Invalid] when a
      * control character is present.
      */
-    fun check(draft: String): LabelCheck = TODO("1.1 GREEN: label rules")
+    fun check(draft: String): LabelCheck {
+        val trimmed = draft.trim()
+        if (trimmed.isEmpty()) return LabelCheck.Clear
+        val scalars = scalarCount(trimmed)
+        if (scalars > MAX_SCALARS) return LabelCheck.TooLong(scalars)
+        if (trimmed.any { Character.isISOControl(it) }) return LabelCheck.Invalid
+        return LabelCheck.Ok(trimmed)
+    }
 }
 
 /** Result of [LabelRules.check]. */

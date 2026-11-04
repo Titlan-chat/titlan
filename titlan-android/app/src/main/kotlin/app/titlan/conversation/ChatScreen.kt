@@ -4,6 +4,7 @@
 package app.titlan.conversation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,10 +38,13 @@ import app.titlan.R
 import kotlinx.coroutines.launch
 
 /**
- * The chat screen (5e-1, freeze CU-D6): header with the conversation label and
- * connection chip; messages in store order, outgoing right and incoming left,
- * text only; composer with a text field and Send. No timestamps and no
- * delivery ticks. Everything shown is read from [ConversationStore] (CU-D3).
+ * The chat screen (5e-1, freeze CU-D6; 1.1, L-D2/L-D5): header with the
+ * conversation title — its label, else the hex form; tapping it opens the
+ * label dialog — and connection chip; messages in store order, outgoing right
+ * and incoming left, text only, each with one local time (this device's
+ * clock on its own side; none for a pre-1.1 message); composer with a text
+ * field and Send. No delivery ticks until P6. Everything shown is read from
+ * [ConversationStore] (CU-D3).
  *
  * INV-1: the draft lives in memory only and is never part of saved instance
  * state; a stored body is rendered through its decoded form, never from raw
@@ -50,6 +54,7 @@ import kotlinx.coroutines.launch
 fun ChatScreen(key: ConversationKey, onBack: () -> Unit, onPairAgain: () -> Unit) {
     val messageFlow = remember(key) { ConversationStore.messages(key) }
     val messages by messageFlow.collectAsState()
+    val rows by ConversationStore.rows.collectAsState()
     val connection by ConversationStore.connection.collectAsState()
     val needsRepair by ConversationStore.needsRepair.collectAsState()
     val notDelivered by ConversationStore.notDelivered.collectAsState()
@@ -58,8 +63,10 @@ fun ChatScreen(key: ConversationKey, onBack: () -> Unit, onPairAgain: () -> Unit
     LaunchedEffect(key) { ConversationStore.refreshMessages(key) }
 
     var draft by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val row = rows.firstOrNull { it.key == key }
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -68,8 +75,16 @@ fun ChatScreen(key: ConversationKey, onBack: () -> Unit, onPairAgain: () -> Unit
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(onClick = onBack) { Text(stringResource(R.string.nav_back)) }
-            Text(stringResource(R.string.conversations_row_label, key.shortHex))
+            Text(
+                conversationTitle(row, key),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClickLabel = stringResource(R.string.label_rename_action)) { renaming = true },
+            )
             ConnectionChip(connection[key])
+        }
+        if (renaming) {
+            LabelDialog(key = key, current = row?.label, onDismiss = { renaming = false })
         }
 
         if (storageError) {
@@ -144,8 +159,9 @@ fun ChatScreen(key: ConversationKey, onBack: () -> Unit, onPairAgain: () -> Unit
 }
 
 /**
- * One message (CU-D6): a `chat/1` body as its text, any other body as one of
- * the two fixed placeholders — the raw bytes are never rendered.
+ * One message (CU-D6; 1.1 L-D2): a `chat/1` body as its text, any other body
+ * as one of the two fixed placeholders — the raw bytes are never rendered —
+ * and, below it, the one local time ([MessageTime]; absent for a pre-1.1 row).
  */
 @Composable
 private fun MessageRow(message: UiMessage, notDelivered: Boolean) {
@@ -166,6 +182,9 @@ private fun MessageRow(message: UiMessage, notDelivered: Boolean) {
                     DecodedBody.Undecodable -> stringResource(R.string.chat_message_undecodable)
                 },
             )
+            message.epochSeconds?.let { at ->
+                Text(MessageTime.formatNow(at), style = MaterialTheme.typography.labelSmall)
+            }
             if (notDelivered) {
                 Text(
                     stringResource(R.string.chat_message_not_delivered),
