@@ -902,6 +902,35 @@ if grep -qF 'implemented on Android; the wire protocol is frozen' README.md; the
   fail=1
 fi
 
+# 16j. Post-MVP roadmap: the Titlan 1.0 plan-of-record amendment (plan-1.0
+#      gate PL-D8, ratified 2026-11-03) is appended under '## Amendments' and
+#      the 2026-07-28 body — the file's first 113 lines — is byte-intact
+#      (hash of record from ledger item 42).
+rm_roadmap=docs/roadmap-post-mvp.md
+rm_body='d37fe4e172ff932277e06dcf3e8d97784151e7738aec5e30385b1799ecf98812'
+if [ -f "$rm_roadmap" ]; then
+  rm_body_now=$(head -n 113 "$rm_roadmap" | sha256sum | cut -d' ' -f1)
+  if [ "$rm_body_now" != "$rm_body" ]; then
+    echo "docs rider 16j: $rm_roadmap first 113 lines changed (append-only; expected $rm_body, found $rm_body_now)"
+    fail=1
+  fi
+  if ! grep -qx '## Amendments' "$rm_roadmap"; then
+    echo "docs rider 16j: $rm_roadmap lacks the '## Amendments' heading"
+    fail=1
+  fi
+  if ! grep -qF 'Titlan 1.0 plan of record (2026-11-03' "$rm_roadmap"; then
+    echo "docs rider 16j: $rm_roadmap lacks the Titlan 1.0 plan-of-record amendment"
+    fail=1
+  fi
+  if ! grep -qF 'is SUPERSEDED: voice and' "$rm_roadmap"; then
+    echo "docs rider 16j: $rm_roadmap amendment does not supersede the off-track sentence"
+    fail=1
+  fi
+else
+  echo "docs rider 16j: MISSING $rm_roadmap"
+  fail=1
+fi
+
 # --- 17. Release identity (5d-2, updated by 5e-2) ------------------------------
 # The release-candidate unit (docs/design/2026-09-release-candidate-freeze.md,
 # sequencing step 3), as updated for the first supported release (5e-2 gate
@@ -1442,4 +1471,4 @@ if [ "$fail" -ne 0 ]; then
   echo "Invariant checks FAILED."
   exit 1
 fi
-echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release identity (5e-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK), post-v0.1.0 docs truth (docs-v010))."
+echo "All invariant checks passed (SPDX headers, applicationId single-source, A11 naming, relay zero-logging/no-fs, release no-test-anchors, delivery-sentinel hygiene, debug-only relay override, debug pin bridge, scan-input hash probe, ffi-bisect probes, relay dep-graph blindness, crash-SDK absence, unit hardening directives, relay-URL single constant, site invariants (5d D6), docs riders (RC-D9/RC-D5), release identity (5e-2), release trust (5d-4), pairing on device (5d-5), conversation UI (5e-1), transport keepalive (5e-1b), CI build environment pinned (runner image + JDK), post-v0.1.0 docs truth (docs-v010), Titlan 1.0 roadmap amendment (plan-1.0))."
