@@ -15,7 +15,7 @@ use zeroize::Zeroize;
 use crate::client::{
     ConnectionObserver, ConnectionState, ConversationId, MessageReceiver, TitlanClient,
 };
-use crate::storage::{DbKey, StoredMessage};
+use crate::storage::{ConversationSummary, DbKey, StoredMessage};
 
 /// Generates a fresh 32-byte DB key from the OS CSPRNG in Rust (maintainer
 /// decision 5a: the key is born in tezca-core, wrapped by the caller —
@@ -148,6 +148,12 @@ pub struct FfiMessage {
     pub payload_type: u8,
     pub type_version: u8,
     pub body: Vec<u8>,
+    /// Local clock at insert for an outgoing row, Unix seconds (1.1, L-D2);
+    /// `None` for incoming rows and for rows stored before 1.1.
+    pub sent_at: Option<i64>,
+    /// Local clock at insert for an incoming row, Unix seconds (1.1, L-D2);
+    /// `None` for outgoing rows and for rows stored before 1.1.
+    pub received_at: Option<i64>,
 }
 
 impl From<StoredMessage> for FfiMessage {
@@ -159,6 +165,30 @@ impl From<StoredMessage> for FfiMessage {
             payload_type: m.payload_type,
             type_version: m.type_version,
             body: m.body,
+            sent_at: m.sent_at,
+            received_at: m.received_at,
+        }
+    }
+}
+
+/// A conversation as the list renders it (1.1, L-D3; mirror of
+/// [`ConversationSummary`]): the local-only label (`None` = unlabelled) and
+/// the creation / last-activity times in Unix seconds.
+#[derive(uniffi::Record)]
+pub struct FfiConversation {
+    pub id: Vec<u8>,
+    pub label: Option<String>,
+    pub created_at: i64,
+    pub last_activity_at: i64,
+}
+
+impl From<ConversationSummary> for FfiConversation {
+    fn from(c: ConversationSummary) -> Self {
+        FfiConversation {
+            id: c.id.to_vec(),
+            label: c.label,
+            created_at: c.created_at,
+            last_activity_at: c.last_activity_at,
         }
     }
 }
@@ -345,6 +375,43 @@ impl FfiClient {
             .into_iter()
             .map(|c| c.to_vec())
             .collect())
+    }
+
+    /// Conversations with label and times, ordered by last activity (1.1,
+    /// L-D4). `list_conversations` is unchanged for existing callers.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`CoreError`] mapping of storage query failures.
+    pub fn list_conversation_summaries(
+        &self,
+    ) -> std::result::Result<Vec<FfiConversation>, TitlanError> {
+        Ok(self
+            .inner
+            .list_conversation_summaries()?
+            .into_iter()
+            .map(FfiConversation::from)
+            .collect())
+    }
+
+    /// Sets or clears a conversation's local-only label (1.1, L-D3): `None`
+    /// and the empty string clear it. A label is a contact name and stays
+    /// inside `SQLCipher` (INV-1).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TitlanError::Other`] when `conversation_id` is not 16 bytes or
+    /// the label breaks the rule (blank, over 64 scalar values, control
+    /// characters — [`crate::CoreError::InvalidLabel`]), otherwise the
+    /// storage-failure mapping.
+    pub fn set_conversation_label(
+        &self,
+        conversation_id: Vec<u8>,
+        label: Option<String>,
+    ) -> std::result::Result<(), TitlanError> {
+        Ok(self
+            .inner
+            .set_conversation_label(&conv_id(&conversation_id)?, label.as_deref())?)
     }
 
     ///
@@ -536,6 +603,19 @@ mod classification_tests {
     /// Negative pin (order: "unsupported-version never surfaces as crypto"):
     /// the structural family maps to `Malformed` and to NO crypto-class
     /// variant.
+    /// 1.1 (L-D3): an invalid label is the caller's fault, not the peer's —
+    /// it surfaces in the INTERNAL class (`Other`), never MALFORMED (which the
+    /// pairing mapper classes as a bad offer) and never a crypto class.
+    #[test]
+    fn invalid_label_is_the_internal_class() {
+        match TitlanError::from(CoreError::InvalidLabel("blank after trimming")) {
+            TitlanError::Other { msg } => {
+                assert_eq!(msg, "invalid conversation label: blank after trimming");
+            }
+            other => panic!("InvalidLabel must map to TitlanError::Other, got {other:?}"),
+        }
+    }
+
     #[test]
     fn structural_family_never_surfaces_as_crypto() {
         for e in [

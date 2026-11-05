@@ -41,8 +41,13 @@ object ConversationStore : SyncEvents {
 
     private val _conversations = MutableStateFlow<List<ConversationKey>>(emptyList())
 
-    /** Most-recent-first, as core lists them. */
+    /** Most recent activity first, as core lists them (1.1, L-D4). */
     val conversations: StateFlow<List<ConversationKey>> = _conversations.asStateFlow()
+
+    private val _rows = MutableStateFlow<List<ConversationRow>>(emptyList())
+
+    /** The list rows (1.1): label and last activity per conversation, in [conversations] order. */
+    val rows: StateFlow<List<ConversationRow>> = _rows.asStateFlow()
 
     private val _connection = MutableStateFlow<Map<ConversationKey, ConnectionState>>(emptyMap())
 
@@ -91,10 +96,22 @@ object ConversationStore : SyncEvents {
             fallback()
         }
 
-    /** Re-reads the conversation list from core (IO) and publishes it; on failure, the last list. */
+    /**
+     * Re-reads the conversation list from core (IO) — the 1.1 summaries, which
+     * carry label and last activity and come ordered by it (L-D4) — and
+     * publishes [rows] and [conversations] together; on failure, the last list.
+     */
     suspend fun refreshConversations(): List<ConversationKey> = guarded({ _conversations.value }) {
         withContext(Dispatchers.IO) {
-            val keys = AppCore.get().listConversations().map { ConversationKey.of(it) }
+            val rows = AppCore.get().listConversationSummaries().map { c ->
+                ConversationRow(
+                    key = ConversationKey.of(c.id),
+                    label = c.label,
+                    lastActivityEpochSeconds = c.lastActivityAt,
+                )
+            }
+            val keys = rows.map { it.key }
+            _rows.value = rows
             _conversations.value = keys
             keys
         }
@@ -108,11 +125,27 @@ object ConversationStore : SyncEvents {
                     id = m.id.toHexLower(),
                     incoming = m.incoming,
                     body = ChatBody.decode(m.payloadType, m.typeVersion, m.body),
+                    // L-D2: one time per bubble — this device's clock on its own side.
+                    epochSeconds = if (m.incoming) m.receivedAt else m.sentAt,
                 )
             }
             flowFor(key).value = list
             list
         }
+    }
+
+    /**
+     * 1.1 (L-D3/L-D5): hands a validated label (or `null` to clear) to core on
+     * IO and re-reads the list. Returns false when core rejected or failed
+     * (the storage-error state is raised; the screen keeps the dialog open).
+     */
+    suspend fun setLabel(key: ConversationKey, label: String?): Boolean {
+        val written = guarded({ false }) {
+            withContext(Dispatchers.IO) { AppCore.get().setConversationLabel(key.bytes, label) }
+            true
+        }
+        if (written) refreshConversations()
+        return written
     }
 
     /**

@@ -130,6 +130,25 @@ pub(crate) fn migrate(conn: &rusqlite::Connection) -> Result<()> {
         .map_err(sql_err)?;
         tx.commit().map_err(sql_err)?;
     }
+
+    if current < 4 {
+        // v4 (unit 1.1 labels-timestamps, L-D1): a local-only conversation
+        // label. NULL = no label (the UI shows the hex form). A label is a
+        // contact name: it lives only inside SQLCipher (INV-1) and never
+        // crosses the wire. Additive and data-preserving — every pre-existing
+        // row keeps its columns and reads NULL here. `messages.sent_at` /
+        // `received_at` have existed since v1 and are written from 1.1 on
+        // (L-D2); pre-1.1 rows are never back-filled.
+        let tx = conn.unchecked_transaction().map_err(sql_err)?;
+        tx.execute_batch("ALTER TABLE conversations ADD COLUMN label TEXT;")
+            .map_err(sql_err)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (4, unixepoch())",
+            [],
+        )
+        .map_err(sql_err)?;
+        tx.commit().map_err(sql_err)?;
+    }
     Ok(())
 }
 

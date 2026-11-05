@@ -105,11 +105,11 @@ fn migrations_apply_once_and_are_idempotent() {
     {
         let store = Store::open(&path, &key).unwrap();
         // Latest schema version (v1 Phase 2 + v2 Phase 4a relay_pin + v3 4b-2
-        // recovery columns).
-        assert_eq!(store.schema_version().unwrap(), 3);
+        // recovery columns + v4 1.1 conversation label).
+        assert_eq!(store.schema_version().unwrap(), 4);
     }
     let store = Store::open(&path, &key).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 3);
+    assert_eq!(store.schema_version().unwrap(), 4);
 }
 
 #[test]

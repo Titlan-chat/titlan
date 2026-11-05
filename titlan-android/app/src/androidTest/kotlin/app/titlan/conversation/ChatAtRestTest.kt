@@ -27,8 +27,12 @@ import org.junit.runner.RunWith
  * form — the SQLCipher stores are opaque, and any accidental preference,
  * saved-state or cache file would show here (the Inv1AtRestTest walk).
  *
- * RED expectation: fails with `kotlin.NotImplementedError` at the stub
- * [ConversationStore.refreshConversations]. GREEN runs the real path.
+ * 1.1 (L-D6): a conversation label is a contact name and joins the canaries —
+ * set through the store, it must be as absent at rest as the chat text.
+ *
+ * RED expectation (5e-1): fails with `kotlin.NotImplementedError` at the stub
+ * [ConversationStore.refreshConversations]. RED expectation (1.1): fails with
+ * `kotlin.NotImplementedError` at the stub [ConversationStore.setLabel].
  */
 @RunWith(AndroidJUnit4::class)
 class ChatAtRestTest {
@@ -48,6 +52,7 @@ class ChatAtRestTest {
         if (!app.isInitialized()) app.initializeIdentity()
         val sent = "titlan chat at-rest sent 5e1 p3w9"
         val received = "titlan chat at-rest received 5e1 z6c4"
+        val label = "titlan label sentinel at-rest q8v2"
         val peerDb = File(context.cacheDir, "chat-at-rest-peer.db").also { it.delete() }
         CoreClientFactory.open(peerDb.path, freshKey(), BuildConfig.RELAY_URL).use { peer ->
             peer.initializeIdentity()
@@ -55,6 +60,8 @@ class ChatAtRestTest {
 
             // RED stops here: the store is unimplemented.
             val key = ConversationStore.refreshConversations().first()
+            // 1.1 RED stops here: the label write is unimplemented.
+            assertTrue("the label canary must be stored", ConversationStore.setLabel(key, label))
             app.startSync(ConversationStore.events)
             assertEquals("the sent canary must be queued", SendOutcome.Queued, ConversationStore.send(key, sent))
             peer.sendChat(peerConv, received)
@@ -66,7 +73,7 @@ class ChatAtRestTest {
             )
         }
 
-        for (text in listOf(sent, received)) {
+        for (text in listOf(sent, received, label)) {
             val bytes = text.toByteArray(Charsets.UTF_8)
             val hex = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
             val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)

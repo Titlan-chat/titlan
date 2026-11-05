@@ -225,4 +225,15 @@ Base of the findings: titlan `main` `b87880190fc997e3e792a2fc1d742e7ddeb5a03e`
 
 ## Amendments
 
-(none)
+- **1.1 labels-timestamps (2026-11-03, maintainer "1.1 gate r1 as
+  recommended"):** CU-D6's "No timestamps" and CU-D7's rows-by-
+  `listConversations()`-order are superseded. Each message shows one local
+  time (the device's clock on its own side at insert: `sent_at` outgoing,
+  `received_at` incoming; rows stored before 1.1 show none). The list
+  orders by last activity and shows the conversation's local-only label
+  (schema v4) with the hex form as subtitle; the chat header is the label
+  and opens the label dialog. "No delivery ticks" stands until P6. The
+  CU-D0 successors "Conversation labels (schema v4 + FFI)" and "Message
+  timestamps" are closed by this unit; delivery state stays with P6.
+  Unit gate `p1-1.1-labels-timestamps-gate.md` r1 (sha256
+  ff5c4b183020b30d6d4ab08d6a14905d70e91cd2abfebab9d2360bf3a43c6c2b).

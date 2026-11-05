@@ -23,7 +23,7 @@ use crate::client::{ConnectionObserver, ConnectionState, ConversationId, Message
 use crate::config::{KeepaliveTiming, PaddingProfile, TransportTiming};
 use crate::envelope::{InnerFrame, PayloadType};
 use crate::pairing::{PAIRING_SECRET_LEN, RECOVERY_CONTRIB_LEN};
-use crate::storage::{Direction, Store, StoredMessage};
+use crate::storage::Store;
 use crate::{CoreError, Result, identity, pairing, session};
 
 use self::http::DepositOutcome;
@@ -516,18 +516,12 @@ impl Engine {
         };
         match frame.payload_type {
             PayloadType::Chat => {
-                if let Ok(id) = self.store.save_incoming(conv, &frame) {
-                    let msg = StoredMessage {
-                        id,
-                        conversation_id: *conv,
-                        direction: Direction::Incoming,
-                        payload_type: frame.payload_type as u8,
-                        type_version: frame.type_version,
-                        body: frame.payload,
-                    };
-                    if let Some(r) = self.receiver.lock().expect("receiver").clone() {
-                        r.on_message(*conv, msg);
-                    }
+                // The row as stored (1.1: with its `received_at`) is what the
+                // receiver sees — one source of truth for the UI's re-read.
+                if let Ok(msg) = self.store.save_incoming(conv, &frame)
+                    && let Some(r) = self.receiver.lock().expect("receiver").clone()
+                {
+                    r.on_message(*conv, msg);
                 }
                 false
             }

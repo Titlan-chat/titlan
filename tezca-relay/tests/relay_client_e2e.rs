@@ -565,8 +565,8 @@ fn schema_v2_relay_pin_migration() {
     let alice = new_client(&dir, "alice.db", &url);
     assert_eq!(
         alice.schema_version().unwrap(),
-        3,
-        "migrations through v3 applied (relay_pin is v2; recovery state is v3)",
+        4,
+        "migrations through v4 applied (relay_pin is v2; recovery state is v3; label is v4)",
     );
 
     // Need a conversation to pin: pair with Bob.

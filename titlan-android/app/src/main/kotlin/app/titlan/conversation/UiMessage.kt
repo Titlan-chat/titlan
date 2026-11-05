@@ -4,12 +4,31 @@
 package app.titlan.conversation
 
 /**
- * One message as the chat screen renders it (5e-1, CU-D6). [id] is the
- * message id as lower-case hex; [body] is the decoded form — text for a
- * `chat/1` frame, or one of the two placeholders. No timestamp and no
- * delivery state cross the FFI in this version (freeze CU-D0/CU-D6).
+ * One message as the chat screen renders it (5e-1, CU-D6; 1.1, L-D2). [id]
+ * is the message id as lower-case hex; [body] is the decoded form — text for
+ * a `chat/1` frame, or one of the two placeholders; [epochSeconds] is the
+ * local clock at insert on this device's side (`sent_at` for an outgoing
+ * message, `received_at` for an incoming one), Unix seconds, `null` for a
+ * message stored before 1.1 — rendered without a time, never back-filled.
+ * No delivery state crosses the FFI until P6 (plan of record PL-D2).
  */
-data class UiMessage(val id: String, val incoming: Boolean, val body: DecodedBody)
+data class UiMessage(
+    val id: String,
+    val incoming: Boolean,
+    val body: DecodedBody,
+    val epochSeconds: Long?,
+)
+
+/**
+ * One conversation as the list renders it (1.1, L-D4): the local-only
+ * [label] (`null` = unlabelled — the row shows the hex form) and the
+ * last-activity time core computed, Unix seconds.
+ */
+data class ConversationRow(
+    val key: ConversationKey,
+    val label: String?,
+    val lastActivityEpochSeconds: Long,
+)
 
 /** The chat screen's view of a stored message body (CU-D6 decoding rule). */
 sealed interface DecodedBody {
